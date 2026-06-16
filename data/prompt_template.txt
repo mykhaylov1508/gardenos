@@ -1,0 +1,40 @@
+Ти — експерт-агроном. Створи практичний посібник з вирощування культури "{CULTURE_NAME}" для початківця в Україні.
+
+Поверни результат ВИКЛЮЧНО у форматі валідного JSON. Почни відповідь з символу `{` і закінчи символом `}`. Не використовуй markdown-обгортки (```).
+
+Структура JSON:
+{
+  "name_uk": "{CULTURE_NAME}",
+  "name_latin": "Наукова назва латиною",
+  "category": "vegetable або fruit або herb або tree або berry",
+  "family": "Назва родини",
+  "lifecycle": "annual або biennial або perennial",
+  "vegetation_days": 90,
+  "frost_tolerance_c": -2,
+  "optimal_temp_min": 18,
+  "optimal_temp_max": 27,
+  "heat_stress_temp": 32,
+  "watering_interval_days": 3,
+  "watering_liters_per_m2": 15,
+  "soil_moisture_preference": "moderate",
+  "feeding_interval_days": 14,
+  "feeding_type": "high_n або high_p або high_k або balanced",
+  "feeder_type": "heavy або medium або light",
+  "good_companions": ["рослина1", "рослина2"],
+  "bad_companions": ["рослина1", "рослина2"],
+  "common_diseases": [
+    {
+      "name": "Назва хвороби",
+      "symptoms": "Короткий опис симптомів",
+      "triggers": "Умови виникнення",
+      "treatment": "Як лікувати (препарат/метод)"
+    }
+  ],
+  "care_tips": ["Порада 1", "Порада 2", "Порада 3"],
+  "harvest_signs": "Ознаки стиглості",
+  "regional_ukraine": {
+    "planting_date": "Орієнтовна дата посадки в Україні",
+    "notes": "Специфічна порада для українського клімату"
+  },
+  "beginner_tips": ["Порада для новачка 1", "Порада для новачка 2"]
+}

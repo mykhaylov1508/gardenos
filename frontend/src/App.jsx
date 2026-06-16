@@ -15,6 +15,8 @@ import AddEventModal from './components/AddEventModal';
 import DashboardPage from './pages/DashboardPage';
 import SeasonPage from './pages/SeasonPage';
 import MapPage from './pages/MapPage';
+import ZonesPage from './pages/ZonesPage';
+import ProfilePage from './pages/ProfilePage';
 
 
 function App() {
@@ -46,10 +48,11 @@ function App() {
             <Route path="/season" element={<SeasonPage />} />
             <Route path="/map" element={<MapPage />} />
             <Route path="/garden" element={<GardenPage />} />
+            <Route path="/garden/zones" element={<ZonesPage />} />
             <Route path="/plants" element={<PlantsPage />} />
             <Route path="/plants/new" element={<NewPlantPage />} />
             <Route path="/plants/:id" element={<PlantDetailPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/settings" element={<ProfilePage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </>

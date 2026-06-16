@@ -1,11 +1,13 @@
 // src/components/Layout.jsx
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import FAB from './FAB';
 import { 
   CalendarCheck, 
   Map as MapIcon, 
   Sprout, 
   Settings,
+  User,
   LogOut,
   Loader2,
   Home,
@@ -57,11 +59,11 @@ export default function Layout() {
             </div>
           </div>
             <button
-              onClick={() => navigate('/settings')}
-              className="p-2 text-gray-400 hover:text-garden-green hover:bg-garden-cream rounded-lg transition-all"
-              title="Налаштування"
+            onClick={() => navigate('/settings')}
+            className="p-2 text-gray-400 hover:text-garden-green hover:bg-garden-cream rounded-lg transition-all"
+            title="Профіль та налаштування"
             >
-              <Settings className="w-5 h-5" />
+            <User className="w-5 h-5" />
             </button>
             <button
               onClick={handleSignOut}
@@ -103,6 +105,8 @@ export default function Layout() {
           </NavLink>
         </div>
       </nav>
+      {/* FAB - 3 священні дії */}
+      <FAB />
     </div>
   );
 }

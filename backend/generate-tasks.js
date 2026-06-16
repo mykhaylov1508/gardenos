@@ -55,6 +55,51 @@ async function getWeatherForecast(lat, lon) {
   }
 }
 
+// ============================================
+// 🍄 ОЦІНКА РИЗИКУ ХВОРОБ (Погода vs Тригери)
+// ============================================
+function evaluateDiseaseRisk(disease, weather, currentMonth) {
+  if (!disease || !disease.triggers) return { riskScore: 0, matchedConditions: [] };
+  
+  const triggers = disease.triggers.toLowerCase();
+  let riskScore = 0;
+  let matchedConditions = [];
+
+  // 1. Перевірка на вологість / дощі
+  if (triggers.includes('волог') || triggers.includes('дощ') || triggers.includes('сирий') || triggers.includes('вентиляц')) {
+    if (weather && weather.last_7_days_rain > 20) {
+      riskScore += 2;
+      matchedConditions.push(`висока кількість опадів (${Math.round(weather.last_7_days_rain)} мм за тиждень)`);
+    }
+  }
+
+  // 2. Перевірка на спеку
+  if (triggers.includes('спек') || triggers.includes('жар') || triggers.includes('висок')) {
+    if (weather && weather.today_max > 28) {
+      riskScore += 2;
+      matchedConditions.push(`спека (${weather.today_max}°C)`);
+    }
+  }
+
+  // 3. Перевірка на прохолоду / перепади температур
+  if (triggers.includes('прохолод') || triggers.includes('перепад') || triggers.includes('холод')) {
+    if (weather && weather.today_min < 12) {
+      riskScore += 2;
+      matchedConditions.push(`прохолодні ночі (${weather.today_min}°C)`);
+    }
+  }
+
+  // 4. Перевірка на шкідників (активні в теплу пору року)
+  if (triggers.includes('комах') || triggers.includes('тля') || triggers.includes('жук') || triggers.includes('мух')) {
+    if (currentMonth >= 5 && currentMonth <= 8) {
+      riskScore += 1;
+      matchedConditions.push('сезон активності шкідників');
+    }
+  }
+
+  return { riskScore, matchedConditions };
+}
+
 const UKRAINE_CITIES = {
   'Київ': { lat: 50.45, lon: 30.52 },
   'Львів': { lat: 49.84, lon: 24.03 },
@@ -103,26 +148,44 @@ function calculateHealthScore(plant, library, events, weather) {
   
   if (!plant.planted_date) return { score: 100, issues: [] };
   
-  // Перевірка поливів
-  const waterings = events.filter(e => e.plant_id === plant.id && e.event_type === 'water');
   const daysSincePlanted = daysBetween(plant.planted_date, today());
-  const expectedWaterings = Math.floor(daysSincePlanted / (library.watering_interval_days || 3));
-  const missedWaterings = Math.max(0, expectedWaterings - waterings.length);
+  const wateringInterval = library.watering_interval_days || 3;
+  
+  // Рахуємо поливи ТІЛЬКИ за останні 14 днів (не за весь період)
+  const fourteenDaysAgo = new Date();
+  fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+  
+  const recentWaterings = events.filter(e => 
+    e.plant_id === plant.id && 
+    e.event_type === 'water' &&
+    new Date(e.event_date) >= fourteenDaysAgo
+  );
+  
+  const expectedWaterings = Math.floor(14 / wateringInterval);
+  const missedWaterings = Math.max(0, expectedWaterings - recentWaterings.length);
   
   if (missedWaterings > 0) {
-    score -= missedWaterings * 8;
-    issues.push(`Пропущено ${missedWaterings} поливів`);
+    score -= missedWaterings * 5; // -5 за кожен пропущений (було -8)
+    issues.push(`Пропущено ${missedWaterings} поливів за останні 14 днів`);
   }
   
-  // Перевірка підживлень (якщо потрібні)
+  // Перевірка підживлень (тільки за останні 30 днів)
   if (library.feeding_interval_days && library.feeding_interval_days > 0) {
-    const feedings = events.filter(e => e.plant_id === plant.id && e.event_type === 'feed');
-    const expectedFeedings = Math.floor(daysSincePlanted / library.feeding_interval_days);
-    const missedFeedings = Math.max(0, expectedFeedings - feedings.length);
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    const recentFeedings = events.filter(e => 
+      e.plant_id === plant.id && 
+      e.event_type === 'feed' &&
+      new Date(e.event_date) >= thirtyDaysAgo
+    );
+    
+    const expectedFeedings = Math.floor(30 / library.feeding_interval_days);
+    const missedFeedings = Math.max(0, expectedFeedings - recentFeedings.length);
     
     if (missedFeedings > 0) {
-      score -= missedFeedings * 10;
-      issues.push(`Пропущено ${missedFeedings} підживлень`);
+      score -= missedFeedings * 5; // -5 за кожен (було -10)
+      issues.push(`Пропущено ${missedFeedings} підживлень за останні 30 днів`);
     }
   }
   
@@ -147,15 +210,36 @@ function calculateHealthScore(plant, library, events, weather) {
 // ============================================
 // 💧 ПРАВИЛО 1: РОЗУМНИЙ ПОЛИВ
 // ============================================
-function generateWateringTask(plant, library, events, weather, stage) {
+async function generateWateringTask(plant, library, events, weather, stage) {
   const stageInfo = STAGE_INFO[stage];
   const lastWatering = events.find(e => e.plant_id === plant.id && e.event_type === 'water');
   const refDate = lastWatering?.event_date || plant.planted_date;
   const daysSince = daysBetween(refDate, today());
   
-  let baseInterval = library.watering_interval_days || 3;
-  let adjustedInterval = baseInterval / stageInfo.watering_mult;
-  let needWater = daysSince >= adjustedInterval;
+    let baseInterval = library.watering_interval_days || 3;
+    let adjustedInterval = baseInterval / stageInfo.watering_mult;
+
+    // Корекція на тип ґрунту (якщо відомий)
+    // Отримуємо soil_type з профілю користувача
+    const { data: profile } = await supabase
+    .from('profiles')
+    .select('soil_type')
+    .eq('id', plant.user_id)
+    .single();
+
+    if (profile?.soil_type) {
+    const soilAdjustments = {
+        'sand': 0.7,      // Піщаний — полив частіше (інтервал × 0.7)
+        'loam': 1.0,      // Суглинок — норма
+        'clay': 1.3,      // Глинистий — рідше (інтервал × 1.3)
+        'chernozem': 1.1, // Чорнозем — трохи рідше
+    };
+    const soilMult = soilAdjustments[profile.soil_type] || 1.0;
+    adjustedInterval = adjustedInterval * soilMult;
+    }
+
+    let needWater = daysSince >= adjustedInterval;
+
   let contextNotes = [];
   
   if (weather) {
@@ -336,42 +420,30 @@ function generateHeatAlert(plant, library, weather, stage) {
 }
 
 // ============================================
-// 🍄 ПРАВИЛО 6: РИЗИК ХВОРОБ (фітофтора тощо)
+// 🍄 ПРАВИЛО: АЛЕРТ ПРО РИЗИК ХВОРОБИ
 // ============================================
-function generateDiseaseAlert(plant, library, weather, stage) {
-  if (!weather) return null;
+function generateDiseaseAlert(plant, library, weather) {
+  if (!library || !library.common_diseases || !Array.isArray(library.common_diseases)) return null;
   
-  // Фітофтора: пасльонові + волога + прохолода
-  const solanaceae = ['Томат', 'Картопля', 'Перець', 'Баклажан'];
-  const isSolanaceae = solanaceae.includes(library.name_uk);
-  
-  if (isSolanaceae && weather.last_7_days_rain > 30 && weather.today_max < 25) {
-    return {
-      task_type: 'alert',
-      title: `🍄 Високий ризик фітофтори! ${plant.custom_name || library.name_uk}`,
-      action_description: 'Профілактично обробити мідьвмісним препаратом (Хом, Оксихом)',
-      explanation_text: `${library.name_uk} + ${Math.round(weather.last_7_days_rain)}мм дощів за тиждень + прохолода = ідеальні умови для фітофтори. Також: обріж нижнє листя (торкається землі), покращ вентиляцію.`,
-      priority: 'high',
-      recommended_time: 'В суху погоду, вранці'
-    };
+  const currentMonth = new Date().getMonth() + 1;
+  const alerts = [];
+
+  for (const disease of library.common_diseases) {
+    const { riskScore, matchedConditions } = evaluateDiseaseRisk(disease, weather, currentMonth);
+    
+    if (riskScore >= 2) {
+      alerts.push({
+        task_type: 'alert',
+        title: `🍄 Високий ризик: ${disease.name}`,
+        action_description: disease.treatment,
+        explanation_text: `Сприятливі умови для ${disease.name}: ${matchedConditions.join(', ')}. Симптоми: ${disease.symptoms}. Профілактика зараз дешевша за лікування!`,
+        priority: 'high',
+        recommended_time: 'Якнайшвидше, в суху погоду'
+      });
+    }
   }
-  
-  // Борошниста роса: гарбузові + спека вдень + прохолодні ночі
-  const cucurbitaceae = ['Огірок', 'Кабачок', 'Гарбуз', 'Диня'];
-  const isCucurbit = cucurbitaceae.includes(library.name_uk);
-  
-  if (isCucurbit && weather.today_max > 28 && weather.today_min < 15 && weather.last_3_days_rain < 5) {
-    return {
-      task_type: 'alert',
-      title: `🌫 Ризик борошнистої роси! ${plant.custom_name || library.name_uk}`,
-      action_description: 'Обприскати розчином соди (1 ст.л. на 10 л) або фунгіцидом',
-      explanation_text: `Спека вдень + прохолодні ночі + сухо = ідеальні умови для борошнистої роси на ${library.name_uk.toLowerCase()}. Ознаки: білий наліт на листі.`,
-      priority: 'normal',
-      recommended_time: 'Ввечері'
-    };
-  }
-  
-  return null;
+
+  return alerts;
 }
 
 // ============================================
@@ -530,13 +602,15 @@ async function generateDailyTasks() {
     ];
     
     for (const rule of rules) {
-      const task = rule();
-      if (task) {
-        newTasks.push({
-          ...task,
-          plant_id: plant.id,
-          user_id: plant.user_id,
-        });
+      const result = await rule();  // ← ДОДАНО await
+      if (result) {
+        if (Array.isArray(result)) {
+          result.forEach(task => {
+            newTasks.push({ ...task, plant_id: plant.id, user_id: plant.user_id });
+          });
+        } else {
+          newTasks.push({ ...result, plant_id: plant.id, user_id: plant.user_id });
+        }
       }
     }
   }

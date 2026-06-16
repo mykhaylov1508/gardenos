@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, Sprout, MapPin, Loader2 } from 'lucide-react';
+import { Plus, MapPin, Loader2 } from 'lucide-react';
 
 export default function GardenPage() {
   const { user } = useAuth();
@@ -20,14 +20,12 @@ export default function GardenPage() {
     try {
       setLoading(true);
       
-      // Отримуємо всі зони
       const { data: zonesData } = await supabase
         .from('my_zones')
         .select('*')
         .eq('user_id', user.id)
         .order('created_at', { ascending: true });
       
-      // Отримуємо всі рослини з інформацією з бібліотеки
       const { data: plantsData } = await supabase
         .from('my_plants')
         .select(`
@@ -47,7 +45,6 @@ export default function GardenPage() {
     }
   }
 
-  // Обчислюємо прогрес дозрівання для рослини
   function getProgress(plant) {
     if (!plant.planted_date || !plant.plant_library?.vegetation_days) {
       return null;
@@ -59,7 +56,6 @@ export default function GardenPage() {
     return Math.min(100, Math.max(0, progress));
   }
 
-  // Іконка категорії
   function getCategoryIcon(category) {
     switch (category) {
       case 'vegetable':
@@ -75,18 +71,15 @@ export default function GardenPage() {
     }
   }
 
-  // Групуємо рослини по зонам
   const plantsByZone = zones.map((zone) => ({
     ...zone,
     plants: plants.filter((p) => p.zone_id === zone.id),
   }));
 
-  // Рослини без зони
   const unassignedPlants = plants.filter((p) => !p.zone_id);
 
   return (
     <div>
-      {/* Заголовок */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-2xl font-bold text-garden-green mb-1">
@@ -97,13 +90,22 @@ export default function GardenPage() {
             {zones.length} {zones.length === 1 ? 'грядці' : 'грядках'}
           </p>
         </div>
-        <button
-          onClick={() => navigate('/plants/new')}
-          className="btn-primary flex items-center gap-2"
-        >
-          <Plus className="w-5 h-5" />
-          Додати
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => navigate('/garden/zones')}
+            className="px-4 py-2 border-2 border-garden-green text-garden-green rounded-xl font-semibold hover:bg-garden-cream transition-all flex items-center gap-2"
+          >
+            <MapPin className="w-5 h-5" />
+            Грядки
+          </button>
+          <button
+            onClick={() => navigate('/plants/new')}
+            className="btn-primary flex items-center gap-2"
+          >
+            <Plus className="w-5 h-5" />
+            Додати
+          </button>
+        </div>
       </div>
 
       {loading && (
@@ -113,7 +115,6 @@ export default function GardenPage() {
         </div>
       )}
 
-      {/* Порожній стан */}
       {!loading && plants.length === 0 && (
         <div className="card text-center py-16">
           <div className="text-6xl mb-4">🌱</div>
@@ -133,7 +134,6 @@ export default function GardenPage() {
         </div>
       )}
 
-      {/* Список зон з рослинами */}
       {!loading && plantsByZone.map((zone) => (
         <div key={zone.id} className="mb-6">
           <div className="flex items-center gap-2 mb-3">
@@ -161,12 +161,10 @@ export default function GardenPage() {
                     className="card hover:shadow-lg cursor-pointer transition-all"
                   >
                     <div className="flex items-center gap-4">
-                      {/* Іконка рослини */}
                       <div className="flex-shrink-0 w-14 h-14 bg-garden-cream rounded-xl flex items-center justify-center text-3xl">
                         {getCategoryIcon(plant.plant_library?.category)}
                       </div>
 
-                      {/* Інфо */}
                       <div className="flex-1 min-w-0">
                         <h4 className="font-bold text-garden-green mb-1">
                           {plant.custom_name || plant.plant_library?.name_uk}
@@ -182,7 +180,6 @@ export default function GardenPage() {
                             })}`}
                         </p>
 
-                        {/* Прогрес дозрівання */}
                         {progress !== null && (
                           <div>
                             <div className="flex items-center justify-between text-xs mb-1">
@@ -209,7 +206,6 @@ export default function GardenPage() {
                         )}
                       </div>
 
-                      {/* Статус */}
                       <div className="flex-shrink-0">
                         {progress >= 90 ? (
                           <span className="text-2xl" title="Готове до збору">
@@ -234,7 +230,6 @@ export default function GardenPage() {
         </div>
       ))}
 
-      {/* Рослини без зони */}
       {!loading && unassignedPlants.length > 0 && (
         <div className="mb-6">
           <h3 className="text-lg font-bold text-garden-green mb-3">

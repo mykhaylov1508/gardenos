@@ -3,11 +3,11 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import AddEventModal from '../components/AddEventModal';
 import { 
   ArrowLeft, Calendar, Droplet, Leaf, Apple, Camera, Plus, 
-  Loader2, AlertCircle, Image as ImageIcon 
+  Loader2, AlertCircle, Image as ImageIcon, Sprout, BookOpen, MapPin
 } from 'lucide-react';
+import AddEventModal from '../components/AddEventModal';
 
 export default function PlantDetailPage() {
   const { id: plantId } = useParams();
@@ -28,7 +28,7 @@ export default function PlantDetailPage() {
     try {
       setLoading(true);
       
-      // Дані рослини + бібліотека
+      // Дані рослини + бібліотека + зона
       const { data: plantData, error: plantError } = await supabase
         .from('my_plants')
         .select(`
@@ -36,7 +36,8 @@ export default function PlantDetailPage() {
           plant_library (
             name_uk, name_latin, category, vegetation_days, 
             watering_interval_days, feeding_interval_days,
-            care_tips, harvest_signs, common_diseases
+            care_tips, harvest_signs, common_diseases, 
+            beginner_tips, regional_ukraine
           ),
           my_zones (name)
         `)
@@ -102,11 +103,21 @@ export default function PlantDetailPage() {
     }
   }
 
-  // Форматування дати
   function formatDate(dateStr) {
     return new Date(dateStr).toLocaleDateString('uk-UA', {
       day: 'numeric', month: 'short'
     });
+  }
+
+  function getCategoryEmoji(category) {
+    switch (category) {
+      case 'vegetable': return '🥬';
+      case 'fruit': return '🍓';
+      case 'herb': return '🌿';
+      case 'tree': return '🌳';
+      case 'berry': return '🍇';
+      default: return '🌱';
+    }
   }
 
   if (loading) {
@@ -132,9 +143,12 @@ export default function PlantDetailPage() {
 
   const progress = getProgress();
   const library = plant.plant_library;
+  const beginnerTips = library?.beginner_tips || [];
+  const diseases = library?.common_diseases || [];
+  const regional = library?.regional_ukraine || {};
 
   return (
-    <div>
+    <div className="pb-24">
       {/* Header з навігацією */}
       <div className="flex items-center justify-between mb-6">
         <button
@@ -156,23 +170,15 @@ export default function PlantDetailPage() {
       {/* Картка рослини */}
       <div className="card mb-6">
         <div className="flex items-start gap-4">
-          {/* Іконка категорії */}
           <div className="flex-shrink-0 w-16 h-16 bg-garden-cream rounded-2xl flex items-center justify-center text-4xl">
-            {library?.category === 'vegetable' && '🥬'}
-            {library?.category === 'fruit' && '🍓'}
-            {library?.category === 'herb' && '🌿'}
-            {library?.category === 'tree' && '🌳'}
-            {library?.category === 'bush' && '🌲'}
-            {library?.category === 'flower' && '🌸'}
+            {getCategoryEmoji(library?.category)}
           </div>
-          
-          {/* Інфо */}
           <div className="flex-1">
             <h2 className="text-xl font-bold text-garden-green mb-1">
               {plant.custom_name || library?.name_uk}
             </h2>
-            <p className="text-gray-600 mb-2">
-              {library?.name_uk} {library?.name_latin && <span className="italic">({library.name_latin})</span>}
+            <p className="text-gray-600 mb-2 italic">
+              {library?.name_latin}
             </p>
             <p className="text-sm text-gray-500">
               📍 {plant.my_zones?.name || 'Без зони'} · 
@@ -206,18 +212,61 @@ export default function PlantDetailPage() {
         )}
       </div>
 
-      {/* Поради з догляду */}
-      {library?.care_tips?.length > 0 && (
-        <div className="card mb-6 bg-garden-cream">
-          <h3 className="font-bold text-garden-green mb-3">💡 Поради по догляду</h3>
+      {/* 🆕 НОВЕ: Регіональні особливості */}
+      {(regional.planting_date || regional.notes) && (
+        <div className="card mb-6 bg-garden-cream/50 border-garden-leaf/30">
+          <h3 className="font-bold text-garden-green mb-3 flex items-center gap-2">
+            <MapPin className="w-5 h-5" />
+            🇺🇦 Особливості для України
+          </h3>
+          {regional.planting_date && (
+            <p className="text-sm text-gray-700 mb-2">
+              <span className="font-semibold">📅 Оптимальна посадка:</span> {regional.planting_date}
+            </p>
+          )}
+          {regional.notes && (
+            <p className="text-sm text-gray-700">
+              <span className="font-semibold">💡 Порада:</span> {regional.notes}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* 🆕 НОВЕ: Поради для початківців */}
+      {beginnerTips.length > 0 && (
+        <div className="card mb-6">
+          <h3 className="font-bold text-garden-green mb-3 flex items-center gap-2">
+            <BookOpen className="w-5 h-5" />
+            💡 Поради для початківця
+          </h3>
           <ul className="space-y-2">
-            {library.care_tips.map((tip, i) => (
+            {beginnerTips.map((tip, i) => (
               <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
-                <span className="text-garden-leaf">✓</span>
+                <span className="text-garden-leaf mt-0.5">✓</span>
                 {tip}
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {/* 🆕 НОВЕ: Типові хвороби та шкідники */}
+      {diseases.length > 0 && (
+        <div className="card mb-6">
+          <h3 className="font-bold text-garden-green mb-3 flex items-center gap-2">
+            <AlertCircle className="w-5 h-5 text-garden-alert" />
+            🍄 Можливі проблеми та лікування
+          </h3>
+          <div className="space-y-4">
+            {diseases.slice(0, 3).map((disease, i) => (
+              <div key={i} className="border-l-4 border-garden-alert/30 pl-3 py-1">
+                <p className="font-semibold text-garden-green text-sm">{disease.name}</p>
+                <p className="text-xs text-gray-600 mt-1"><span className="font-medium">Симптоми:</span> {disease.symptoms}</p>
+                <p className="text-xs text-gray-600"><span className="font-medium">Причина:</span> {disease.triggers}</p>
+                <p className="text-xs text-garden-leaf mt-1"><span className="font-medium">Лікування:</span> {disease.treatment}</p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -226,7 +275,7 @@ export default function PlantDetailPage() {
         <div className="card mb-6">
           <h3 className="font-bold text-garden-green mb-3 flex items-center gap-2">
             <Camera className="w-5 h-5" />
-            Фото ({photos.length})
+            Фотохроніка ({photos.length})
           </h3>
           <div className="grid grid-cols-3 gap-2">
             {photos.map((photo, i) => (
@@ -234,7 +283,7 @@ export default function PlantDetailPage() {
                 key={i}
                 src={photo.url}
                 alt={photo.note || 'Фото рослини'}
-                className="w-full aspect-square object-cover rounded-lg cursor-pointer hover:opacity-90"
+                className="w-full aspect-square object-cover rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
                 onClick={() => window.open(photo.url, '_blank')}
               />
             ))}
@@ -254,10 +303,8 @@ export default function PlantDetailPage() {
           <div className="space-y-4">
             {events.map(event => (
               <div key={event.id} className="flex items-start gap-3 pb-4 border-b border-gray-100 last:border-0 last:pb-0">
-                <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${getEventBadgeColor(event.event_type)}`}>
-                  <div className="text-white">
-                    {getEventIcon(event.event_type)}
-                  </div>
+                <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-white ${getEventBadgeColor(event.event_type)}`}>
+                  {getEventIcon(event.event_type)}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-1">
@@ -295,7 +342,7 @@ export default function PlantDetailPage() {
         )}
       </div>
 
-      {/* Модальне вікно додавання події (спрощена версія) */}
+      {/* Модальне вікно додавання події */}
       {showAddEvent && (
         <AddEventModal
           plantId={plantId}
@@ -303,7 +350,7 @@ export default function PlantDetailPage() {
           onClose={() => setShowAddEvent(false)}
           onEventAdded={() => {
             setShowAddEvent(false);
-            fetchData(); // Оновлюємо дані
+            fetchData(); // Оновлюємо дані після додавання
           }}
         />
       )}

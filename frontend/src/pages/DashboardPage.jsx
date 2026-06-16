@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { 
   Sun, Cloud, CloudRain, Thermometer, Droplet, Wind,
   Sprout, CheckCircle, Apple, AlertTriangle, ArrowRight,
-  Calendar, Loader2
+  Calendar, Loader2, Clock
 } from 'lucide-react';
 
 export default function DashboardPage() {
@@ -40,7 +40,7 @@ export default function DashboardPage() {
       // 2. Рахуємо статистику
       const { data: plants } = await supabase
         .from('my_plants')
-        .select('*, plant_library(vegetation_days)')
+        .select('*, plant_library(vegetation_days), health_score')
         .eq('user_id', user.id)
         .eq('status', 'active');
       
@@ -63,20 +63,35 @@ export default function DashboardPage() {
         }
       });
       
+      // Розрахунок загального Health Score (середнє по всіх рослинах)
+      const healthScores = (plants || [])
+        .map(p => p.health_score)
+        .filter(score => score !== null && score !== undefined);
+
+      const averageHealthScore = healthScores.length > 0
+        ? Math.round(healthScores.reduce((sum, score) => sum + score, 0) / healthScores.length)
+        : 100; // Якщо немає даних, показуємо 100%
+
+      // Підрахунок рослин з проблемами
+      const plantsWithIssues = healthScores.filter(score => score < 70).length;
+
       setStats({
         totalPlants: (plants || []).length,
-        plantsWithIssues: 0, // Поки 0, можна додати логіку пізніше
+        plantsWithIssues,
         tasksToday: (tasks || []).length,
         urgentTasks: (tasks || []).filter(t => t.priority === 'high' || t.priority === 'urgent').length,
         readyToHarvest,
+        healthScore: averageHealthScore,
       });
       
       // Критичні задачі (high priority)
-      setCriticalTasks(
-        (tasks || [])
-          .filter(t => t.priority === 'high' || t.priority === 'urgent')
-          .slice(0, 3)
-      );
+      // Сортуємо задачі: спочатку urgent/high, потім normal. Беремо максимум 4.
+      const priorityWeight = { urgent: 3, high: 2, normal: 1, low: 0 };
+      const sortedTasks = (tasks || [])
+        .sort((a, b) => priorityWeight[b.priority] - priorityWeight[a.priority])
+        .slice(0, 4);
+      
+      setCriticalTasks(sortedTasks);
       
       // Сезонний прогрес (припустимо сезон 1 квітня - 31 жовтня = 213 днів)
       const seasonStart = new Date(new Date().getFullYear(), 3, 1); // 1 квітня
@@ -92,6 +107,34 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+    // Виконання задачі прямо з Dashboard
+  async function handleTaskComplete(taskId) {
+    try {
+      const { error } = await supabase
+        .from('tasks')
+        .update({ 
+          is_completed: true,
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', taskId);
+      
+      if (error) throw error;
+      
+      // Оновлюємо дані після виконання
+      await fetchDashboardData();
+    } catch (err) {
+      console.error('Помилка виконання задачі:', err);
+    }
+  }
+
+  // Визначення часу доби для привітання
+  function getTimeGreeting() {
+    const hour = new Date().getHours();
+    if (hour < 11) return { text: 'Доброго ранку', icon: '🌅' };
+    if (hour < 18) return { text: 'Доброго дня', icon: '☀️' };
+    return { text: 'Доброго вечора', icon: '🌇' };
   }
 
   async function fetchWeather() {
@@ -238,6 +281,78 @@ export default function DashboardPage() {
         </div>
       )}
 
+  {/* Пульс садиби */}
+  <div className="card bg-gradient-to-br from-garden-leaf/10 to-garden-green/10 border-garden-leaf/30">
+    <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center gap-2">
+        <span className="text-2xl">🌿</span>
+        <h3 className="font-bold text-garden-green text-lg">
+          Пульс садиби
+        </h3>
+      </div>
+      <div className="text-right">
+        <div className={`text-4xl font-bold ${
+          stats.healthScore >= 80 ? 'text-garden-leaf' :
+          stats.healthScore >= 60 ? 'text-garden-harvest' :
+          'text-garden-alert'
+        }`}>
+          {stats.healthScore}
+        </div>
+        <div className="text-xs text-gray-600">
+          {stats.healthScore >= 80 ? 'Добре' :
+          stats.healthScore >= 60 ? 'Потребує уваги' :
+          'Критично'}
+        </div>
+      </div>
+    </div>
+    
+    {/* Шкала */}
+    <div className="mb-4">
+      <div className="w-full bg-white/60 rounded-full h-3 overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all ${
+            stats.healthScore >= 80 ? 'bg-garden-leaf' :
+            stats.healthScore >= 60 ? 'bg-garden-harvest' :
+            'bg-garden-alert'
+          }`}
+          style={{ width: `${stats.healthScore}%` }}
+        />
+      </div>
+    </div>
+    
+    {/* Деталі */}
+    <div className="grid grid-cols-3 gap-3 text-center">
+      <div className="bg-white/60 rounded-lg p-3">
+        <div className="text-2xl mb-1">
+          {stats.plantsWithIssues === 0 ? '🟢' : '🟡'}
+        </div>
+        <div className="text-xs text-gray-600">
+          {stats.plantsWithIssues === 0 
+            ? 'Всі рослини в нормі' 
+            : `${stats.plantsWithIssues} потребують уваги`}
+        </div>
+      </div>
+      <div className="bg-white/60 rounded-lg p-3">
+        <div className="text-2xl mb-1">
+          {stats.urgentTasks === 0 ? '🟢' : '🔴'}
+        </div>
+        <div className="text-xs text-gray-600">
+          {stats.urgentTasks === 0 
+            ? 'Немає термінових задач' 
+            : `${stats.urgentTasks} термінових`}
+        </div>
+      </div>
+      <div className="bg-white/60 rounded-lg p-3">
+        <div className="text-2xl mb-1">🍎</div>
+        <div className="text-xs text-gray-600">
+          {stats.readyToHarvest === 0 
+            ? 'Немає готових' 
+            : `${stats.readyToHarvest} готові до збору`}
+        </div>
+      </div>
+    </div>
+  </div>
+
       {/* Статистика - 3 картки */}
       <div className="grid grid-cols-3 gap-3">
         {/* Рослини */}
@@ -317,46 +432,86 @@ export default function DashboardPage() {
       </div>
 
       {/* Критичні задачі */}
-      {criticalTasks.length > 0 && (
-        <div className="card bg-garden-alert/5 border-garden-alert/20">
-          <div className="flex items-center gap-2 mb-3">
-            <AlertTriangle className="w-5 h-5 text-garden-alert" />
-            <h3 className="font-bold text-garden-alert">
-              🚨 Термінові задачі
-            </h3>
+            {/* 🆕 РАНКОВИЙ БРИФІНГ: Задачі на сьогодні */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-garden-green text-lg flex items-center gap-2">
+            {getTimeGreeting().icon} {getTimeGreeting().text}!
+          </h3>
+          {weather && (
+            <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
+              {Math.round(weather.today.temp_max)}°C, {weather.today.rain > 0 ? `дощ ${weather.today.rain}мм` : 'без опадів'}
+            </span>
+          )}
+        </div>
+
+        {criticalTasks.length === 0 ? (
+          <div className="card text-center py-8 bg-garden-leaf/10 border-garden-leaf/30">
+            <div className="text-4xl mb-2">🎉</div>
+            <p className="font-semibold text-garden-green">На сьогодні завдань немає!</p>
+            <p className="text-sm text-gray-600 mt-1">Всі рослини доглянуті. Час відпочити.</p>
           </div>
-          <div className="space-y-2">
-            {criticalTasks.map(task => (
-              <div 
-                key={task.id}
-                className="bg-white rounded-lg p-3 flex items-center gap-3"
-              >
-                <span className="text-2xl">
-                  {task.task_type === 'water' && '💧'}
-                  {task.task_type === 'feed' && '🌿'}
-                  {task.task_type === 'harvest' && '🍎'}
-                  {task.task_type === 'alert' && '⚠️'}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-garden-green text-sm truncate">
-                    {task.title}
-                  </p>
-                  <p className="text-xs text-gray-600 truncate">
-                    {task.recommended_time}
-                  </p>
+        ) : (
+          <div className="space-y-3">
+            {criticalTasks.map(task => {
+              // Визначаємо колір рамки за пріоритетом
+              const borderColor = task.priority === 'urgent' ? 'border-garden-alert' : 
+                                  task.priority === 'high' ? 'border-garden-harvest' : 'border-garden-leaf';
+              
+              const taskIcon = task.task_type === 'water' ? '💧' :
+                               task.task_type === 'feed' ? '🌿' :
+                               task.task_type === 'harvest' ? '🍎' :
+                               task.task_type === 'alert' ? '🚨' : '📋';
+
+              return (
+                <div 
+                  key={task.id} 
+                  className={`bg-white rounded-xl shadow-sm border-l-4 ${borderColor} p-4 transition-all hover:shadow-md`}
+                >
+                  <div className="flex items-start justify-between gap-3 mb-2">
+                    <div className="flex items-start gap-3 flex-1">
+                      <span className="text-2xl flex-shrink-0 mt-0.5">{taskIcon}</span>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-bold text-garden-green text-base leading-tight mb-1">
+                          {task.title}
+                        </h4>
+                        {/* "Чому" - головна фіча навчання */}
+                        <p className="text-sm text-gray-600 leading-snug">
+                          {task.explanation_text}
+                        </p>
+                        <div className="flex items-center gap-1.5 mt-2 text-xs text-gray-500">
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>{task.recommended_time || 'Будь-який час'}</span>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Кнопка швидкого виконання */}
+                    <button
+                      onClick={() => handleTaskComplete(task.id)}
+                      className="flex-shrink-0 bg-garden-green text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-opacity-90 transition-all flex items-center gap-1.5 shadow-sm"
+                    >
+                      <CheckCircle className="w-4 h-4" />
+                      Виконано
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
+        )}
+
+        {/* Посилання на повний список */}
+        {criticalTasks.length > 0 && (
           <button
-            onClick={() => navigate('/')}
-            className="mt-3 w-full py-2 text-sm font-semibold text-garden-green hover:bg-white rounded-lg transition-all flex items-center justify-center gap-1"
+            onClick={() => navigate('/tasks')}
+            className="w-full py-3 text-sm font-semibold text-garden-green hover:bg-garden-cream rounded-xl transition-all flex items-center justify-center gap-1 border border-garden-green/20"
           >
-            Перейти до всіх задач
+            Переглянути всі задачі на тиждень
             <ArrowRight className="w-4 h-4" />
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Швидкі дії */}
       <div className="card">
