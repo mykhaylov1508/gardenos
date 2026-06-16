@@ -1,0 +1,384 @@
+-- ============================================
+-- GardenOS v2.0 - Схема бази даних
+-- ============================================
+
+-- Вмикаємо UUID-генератор
+create extension if not exists "uuid-ossp";
+
+-- ============================================
+-- ТАБЛИЦЯ 1: Бібліотека рослин (PlantLibrary)
+-- Це база знань, яка вже заповнена
+-- ============================================
+create table plant_library (
+  id uuid primary key default uuid_generate_v4(),
+  name_uk text not null,
+  name_latin text,
+  category text not null, -- vegetable / fruit / herb / tree / bush / flower
+  family text,
+  icon_slug text,
+  frost_tolerance_c numeric,
+  optimal_temp_min numeric,
+  optimal_temp_max numeric,
+  heat_stress_temp numeric,
+  vegetation_days int not null,
+  full_maturity_days int,
+  watering_interval_days int not null,
+  watering_liters_per_m2 numeric,
+  soil_moisture_preference text,
+  feeding_interval_days int,
+  feeding_type text,
+  feeder_type text,
+  good_companions text[],
+  bad_companions text[],
+  common_diseases jsonb,
+  nutrient_deficiencies jsonb,
+  care_tips text[],
+  harvest_signs text,
+  regional_notes jsonb,
+  created_at timestamp default now()
+);
+
+-- ============================================
+-- ТАБЛИЦЯ 2: Користувачі (розширення auth.users)
+-- ============================================
+create table profiles (
+  id uuid references auth.users primary key,
+  email text,
+  full_name text,
+  region text,
+  garden_type text,
+  created_at timestamp default now()
+);
+
+-- Автоматично створювати профіль при реєстрації
+create or replace function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.profiles (id, email)
+  values (new.id, new.email);
+  return new;
+end;
+$$ language plpgsql security definer;
+
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();
+
+-- ============================================
+-- ТАБЛИЦЯ 3: Зони на городі (грядки)
+-- ============================================
+create table my_zones (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid references profiles(id) on delete cascade,
+  name text not null,
+  zone_type text, -- bed / greenhouse / pot / tree_circle
+  notes text,
+  created_at timestamp default now()
+);
+
+-- ============================================
+-- ТАБЛИЦЯ 4: Мої рослини (інстанси на городі)
+-- ============================================
+create table my_plants (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid references profiles(id) on delete cascade,
+  zone_id uuid references my_zones(id),
+  library_id uuid references plant_library(id),
+  custom_name text,
+  planted_date date,
+  expected_harvest_date date,
+  area_m2 numeric default 1,
+  status text default 'active', -- active / harvested / dead
+  notes text,
+  created_at timestamp default now()
+);
+
+-- ============================================
+-- ТАБЛИЦЯ 5: Лог подій (що я зробив)
+-- ============================================
+create table events_log (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid references profiles(id) on delete cascade,
+  plant_id uuid references my_plants(id) on delete cascade,
+  event_type text not null, -- water / feed / harvest / observe / prune
+  event_date date not null default current_date,
+  quantity numeric,
+  unit text,
+  notes text,
+  photo_url text,
+  created_at timestamp default now()
+);
+
+-- ============================================
+-- ТАБЛИЦЯ 6: Задачі (що мені каже система зробити)
+-- ============================================
+create table tasks (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid references profiles(id) on delete cascade,
+  plant_id uuid references my_plants(id) on delete cascade,
+  task_type text not null, -- water / feed / harvest / alert
+  title text not null,
+  action_description text,
+  explanation_text text,
+  due_date date not null default current_date,
+  recommended_time text,
+  priority text default 'normal', -- urgent / high / normal / low
+  is_completed boolean default false,
+  completed_at timestamp,
+  created_at timestamp default now()
+);
+
+-- ============================================
+-- ТАБЛИЦЯ 7: Алерти (погодні та критичні)
+-- ============================================
+create table alerts (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid references profiles(id) on delete cascade,
+  plant_id uuid references my_plants(id) on delete cascade,
+  alert_type text not null, -- frost / heat / disease / pest
+  severity text not null, -- critical / warning / info
+  title text not null,
+  actions jsonb,
+  explanation_text text,
+  deadline timestamp,
+  is_acknowledged boolean default false,
+  created_at timestamp default now()
+);
+
+-- ============================================
+-- ІНДЕКСИ для швидкості
+-- ============================================
+create index idx_my_plants_user on my_plants(user_id);
+create index idx_events_log_plant on events_log(plant_id);
+create index idx_tasks_user_date on tasks(user_id, due_date);
+create index idx_alerts_user on alerts(user_id, created_at);
+
+-- ============================================
+-- RLS (Row Level Security) — кожен бачить тільки своє
+-- ============================================
+alter table profiles enable row level security;
+alter table my_zones enable row level security;
+alter table my_plants enable row level security;
+alter table events_log enable row level security;
+alter table tasks enable row level security;
+alter table alerts enable row level security;
+
+-- Політики: користувач бачить тільки свої дані
+create policy "Users can view own profile" on profiles for select using (auth.uid() = id);
+create policy "Users can update own profile" on profiles for update using (auth.uid() = id);
+
+create policy "Users can view own zones" on my_zones for select using (auth.uid() = user_id);
+create policy "Users can insert own zones" on my_zones for insert with check (auth.uid() = user_id);
+create policy "Users can update own zones" on my_zones for update using (auth.uid() = user_id);
+create policy "Users can delete own zones" on my_zones for delete using (auth.uid() = user_id);
+
+create policy "Users can view own plants" on my_plants for select using (auth.uid() = user_id);
+create policy "Users can insert own plants" on my_plants for insert with check (auth.uid() = user_id);
+create policy "Users can update own plants" on my_plants for update using (auth.uid() = user_id);
+create policy "Users can delete own plants" on my_plants for delete using (auth.uid() = user_id);
+
+create policy "Users can view own events" on events_log for select using (auth.uid() = user_id);
+create policy "Users can insert own events" on events_log for insert with check (auth.uid() = user_id);
+create policy "Users can update own events" on events_log for update using (auth.uid() = user_id);
+create policy "Users can delete own events" on events_log for delete using (auth.uid() = user_id);
+
+create policy "Users can view own tasks" on tasks for select using (auth.uid() = user_id);
+create policy "Users can insert own tasks" on tasks for insert with check (auth.uid() = user_id);
+create policy "Users can update own tasks" on tasks for update using (auth.uid() = user_id);
+create policy "Users can delete own tasks" on tasks for delete using (auth.uid() = user_id);
+
+create policy "Users can view own alerts" on alerts for select using (auth.uid() = user_id);
+create policy "Users can insert own alerts" on alerts for insert with check (auth.uid() = user_id);
+create policy "Users can update own alerts" on alerts for update using (auth.uid() = user_id);
+create policy "Users can delete own alerts" on alerts for delete using (auth.uid() = user_id);
+
+-- Бібліотека рослин доступна всім для читання
+create policy "Anyone can read plant library" on plant_library for select using (true);
+
+-- ============================================
+-- ЗАПОВНЕННЯ БІБЛІОТЕКИ РОСЛИН (22 культури)
+-- ============================================
+insert into plant_library (
+  name_uk, name_latin, category, family,
+  frost_tolerance_c, optimal_temp_min, optimal_temp_max, heat_stress_temp,
+  vegetation_days, full_maturity_days,
+  watering_interval_days, watering_liters_per_m2, soil_moisture_preference,
+  feeding_interval_days, feeding_type, feeder_type,
+  good_companions, bad_companions,
+  care_tips, harvest_signs
+) values
+('Томат', 'Solanum lycopersicum', 'vegetable', 'Solanaceae',
+ -1, 18, 27, 32, 75, 110,
+ 3, 15, 'moderate', 14, 'high_k', 'heavy',
+ array['базилік', 'морква', 'петрушка', 'часник'],
+ array['капуста', 'фенхель', 'картопля'],
+ array['Пасинкуйте щотижня', 'Підв''язуйте до опори', 'Мульчуйте соломою'],
+ 'Плоди рівномірно забарвлені, легко від''єднуються від плодоніжки'),
+
+('Огірок', 'Cucumis sativus', 'vegetable', 'Cucurbitaceae',
+ 0, 20, 28, 35, 50, 70,
+ 2, 20, 'moist', 10, 'balanced', 'heavy',
+ array['кріп', 'кукурудза', 'горох', 'квасоля'],
+ array['томат', 'картопля', 'кабачок'],
+ array['Поливайте тільки під корінь', 'Збирайте плоди щодня', 'Підв''язуйте до шпалери'],
+ 'Плоди 10-15 см, темно-зелені, без жовтизни'),
+
+('Картопля', 'Solanum tuberosum', 'vegetable', 'Solanaceae',
+ -2, 16, 22, 30, 70, 100,
+ 7, 25, 'moderate', 21, 'high_k', 'heavy',
+ array['бобові', 'капуста', 'кукурудза'],
+ array['томат', 'огірок', 'соняшник'],
+ array['Підгортайте двічі за сезон', 'Збирайте колорадського жука вручну'],
+ 'Бадилля жовтіє і лягає — через 2 тижні копати'),
+
+('Перець солодкий', 'Capsicum annuum', 'vegetable', 'Solanaceae',
+ 0, 20, 28, 32, 100, 130,
+ 3, 12, 'moderate', 14, 'high_k', 'heavy',
+ array['базилік', 'томат', 'морква'],
+ array['фенхель', 'капуста'],
+ array['Теплолюбний — саджайте в теплицю', 'Не переливайте'],
+ 'Плоди досягли сортового кольору'),
+
+('Морква', 'Daucus carota', 'vegetable', 'Apiaceae',
+ -3, 15, 22, 28, 90, 120,
+ 5, 15, 'moderate', 21, 'balanced', 'light',
+ array['цибуля', 'томат', 'розмарин'],
+ array['кріп', 'аніс'],
+ array['Проріджуйте двічі', 'НЕ підживлюйте свіжим гноєм'],
+ 'Діаметр коренеплоду 2-3 см, виглянув з землі'),
+
+('Цибуля ріпчаста', 'Allium cepa', 'vegetable', 'Amaryllidaceae',
+ -4, 12, 25, 30, 90, 120,
+ 7, 10, 'moderate', 21, 'balanced', 'medium',
+ array['морква', 'томат', 'полуниця'],
+ array['горох', 'квасоля'],
+ array['Припиніть полив за 3 тижні до збору', 'Коли перо лягло — час збирати'],
+ 'Листя пожовкло і полягло'),
+
+('Буряк столовий', 'Beta vulgaris', 'vegetable', 'Amaranthaceae',
+ -3, 15, 24, 30, 80, 110,
+ 6, 15, 'moderate', 21, 'balanced', 'medium',
+ array['капуста', 'огірок', 'цибуля'],
+ array['картопля', 'кукурудза'],
+ array['Підживіть бором коли коренеплід з горіх'],
+ 'Діаметр 6-8 см'),
+
+('Капуста білоголова', 'Brassica oleracea', 'vegetable', 'Brassicaceae',
+ -5, 15, 20, 28, 100, 140,
+ 3, 25, 'moist', 14, 'high_n', 'heavy',
+ array['буряк', 'картопля', 'квасоля'],
+ array['томат', 'полуниця'],
+ array['Багато поливу — інакше потріскається', 'Обробляйте від гусені'],
+ 'Головка щільна, досягла сортового розміру'),
+
+('Кабачок', 'Cucurbita pepo', 'vegetable', 'Cucurbitaceae',
+ 0, 18, 28, 32, 45, 70,
+ 3, 20, 'moist', 14, 'balanced', 'heavy',
+ array['кукурудза', 'квасоля', 'буряк'],
+ array['картопля', 'огірок'],
+ array['Збирайте молоді плоди — стимулює нові'],
+ 'Довжина 15-25 см, шкірка ніжна'),
+
+('Базилік', 'Ocimum basilicum', 'herb', 'Lamiaceae',
+ 0, 20, 30, 35, 40, 60,
+ 2, 8, 'moist', 21, 'balanced', 'light',
+ array['томат', 'перець', 'баклажан'],
+ array['кріп', 'майоран'],
+ array['Прищипуйте верхівки', 'Зривайте зверху вниз', 'Боїться холоду'],
+ 'Листя насичено-зелене, ароматне'),
+
+('Кріп', 'Anethum graveolens', 'herb', 'Apiaceae',
+ -3, 15, 25, 30, 35, 70,
+ 3, 10, 'moderate', 0, 'none', 'light',
+ array['огірок', 'капуста', 'салат'],
+ array['морква', 'томат', 'базилік'],
+ array['Сійте кожні 2 тижні', 'Не підживлюйте'],
+ 'Зелень 15-20 см'),
+
+('Петрушка', 'Petroselinum crispum', 'herb', 'Apiaceae',
+ -5, 15, 25, 30, 60, 90,
+ 4, 10, 'moderate', 21, 'balanced', 'light',
+ array['томат', 'редис', 'горох'],
+ array['селера', 'морква'],
+ array['Замочіть насіння на добу перед посівом', 'Зрізайте зовнішні стебла'],
+ 'Зелень пишна, стебла пружні'),
+
+('Салат листовий', 'Lactuca sativa', 'vegetable', 'Asteraceae',
+ -2, 15, 20, 25, 30, 45,
+ 2, 8, 'moist', 14, 'high_n', 'light',
+ array['редис', 'морква', 'полуниця'],
+ array['селера'],
+ array['У спеку >25°C йде в стрілку — затінюйте', 'Зрізайте зовнішнє листя'],
+ 'Листя соковите, яскраво-зелене'),
+
+('Редис', 'Raphanus sativus', 'vegetable', 'Brassicaceae',
+ -3, 12, 18, 25, 25, 35,
+ 2, 10, 'moist', 0, 'none', 'light',
+ array['салат', 'горох', 'огірок'],
+ array['капуста', 'ріпа'],
+ array['Садіть у прохолодну пору', 'Проріджуйте на 3-5 см'],
+ 'Коренеплід 2-3 см виглянув із землі'),
+
+('Часник', 'Allium sativum', 'vegetable', 'Amaryllidaceae',
+ -10, 15, 25, 30, 100, 120,
+ 7, 12, 'moderate', 30, 'high_k', 'medium',
+ array['томат', 'морква', 'полуниця'],
+ array['горох', 'квасоля', 'капуста'],
+ array['Припиніть полив за 3 тижні до збору'],
+ 'Листя пожовкло на 2/3'),
+
+('Горох', 'Pisum sativum', 'vegetable', 'Fabaceae',
+ -4, 12, 22, 25, 55, 75,
+ 3, 12, 'moderate', 0, 'none', 'light',
+ array['морква', 'огірок', 'кукурудза'],
+ array['цибуля', 'часник', 'картопля'],
+ array['Потребує підпори', 'У спеку >25°C зупиняє ріст'],
+ 'Стручки налиті але ще пласкі'),
+
+('Квасоля кущова', 'Phaseolus vulgaris', 'vegetable', 'Fabaceae',
+ 0, 18, 26, 30, 50, 75,
+ 3, 15, 'moderate', 0, 'none', 'light',
+ array['кукурудза', 'капуста', 'буряк'],
+ array['цибуля', 'часник', 'фенхель'],
+ array['Фіксує азот — не підживлюйте азотом'],
+ 'Стручки 10-15 см, хрусткі'),
+
+('Кукурудза цукрова', 'Zea mays', 'vegetable', 'Poaceae',
+ 0, 20, 30, 35, 70, 90,
+ 4, 20, 'moderate', 21, 'high_n', 'heavy',
+ array['квасоля', 'гарбуз', 'огірок'],
+ array['томат', 'селера'],
+ array['Садіть блоком мінімум 4×4', 'Поливайте у фазі цвітіння'],
+ 'Волосся коричневе і сухе'),
+
+('Полуниця садова', 'Fragaria × ananassa', 'fruit', 'Rosaceae',
+ -8, 15, 25, 30, 30, 45,
+ 3, 12, 'moist', 21, 'balanced', 'medium',
+ array['часник', 'цибуля', 'салат'],
+ array['капуста', 'картопля', 'малина'],
+ array['Мульчуйте соломою перед цвітінням', 'Після збору — обріжте листя'],
+ 'Ягода темно-червона, легко знімається'),
+
+('Малина', 'Rubus idaeus', 'fruit', 'Rosaceae',
+ -25, 15, 25, 30, 30, 45,
+ 4, 15, 'moist', 30, 'balanced', 'medium',
+ array['часник', 'полинь', 'ромашка'],
+ array['картопля', 'томат', 'полуниця'],
+ array['Обрізайте відплодоносивші пагони восени', 'Мульчуйте щорічно'],
+ 'Ягода темно-червона, легко знімається'),
+
+('Смородина чорна', 'Ribes nigrum', 'fruit', 'Grossulariaceae',
+ -30, 15, 25, 30, 40, 60,
+ 5, 20, 'moderate', 30, 'high_k', 'medium',
+ array['цибуля', 'часник'],
+ array['аґрус', 'малина'],
+ array['Обрізайте старі гілки (>4 роки) щовесни'],
+ 'Ягоди чорні, блискучі'),
+
+('Яблуня', 'Malus domestica', 'tree', 'Rosaceae',
+ -35, 15, 28, 32, 120, 180,
+ 10, 50, 'moderate', 60, 'balanced', 'heavy',
+ array['часник', 'кріп', 'настурція'],
+ array['картопля', 'горіх'],
+ array['Обрізка навесні до розпускання бруньок', 'Біліть стовбур восени і навесні'],
+ 'Насіння коричневе, плоди легко відриваються');

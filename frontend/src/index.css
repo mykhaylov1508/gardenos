@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Підключаємо шрифт Nunito з Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Nunito+Sans:wght@400;500;600&display=swap');
+
+body {
+  @apply bg-garden-cream text-garden-green font-sans;
+}
+
+/* Кастомні класи для типових елементів */
+@layer components {
+  .btn-primary {
+    @apply bg-garden-green text-white px-6 py-3 rounded-xl font-semibold 
+           hover:bg-opacity-90 transition-all shadow-md hover:shadow-lg;
+  }
+  
+  .btn-success {
+    @apply bg-garden-leaf text-white px-6 py-3 rounded-xl font-semibold 
+           hover:bg-opacity-90 transition-all;
+  }
+  
+  .card {
+    @apply bg-white rounded-2xl shadow-md p-6 border border-gray-100;
+  }
+  
+  .task-card {
+    @apply bg-white rounded-2xl shadow-sm p-5 border-l-4 
+           hover:shadow-md transition-all cursor-pointer;
+  }
+  
+  .priority-high {
+    @apply border-l-garden-alert;
+  }
+  
+  .priority-normal {
+    @apply border-l-garden-water;
+  }
+  
+  .priority-low {
+    @apply border-l-gray-300;
+  }
+}
