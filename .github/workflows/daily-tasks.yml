@@ -1,0 +1,48 @@
+# .github/workflows/daily-tasks.yml
+# Автоматичний запуск Rule Engine щодня о 6:00 ранку
+
+name: Daily Tasks Generator
+
+on:
+  # Запуск за розкладом: щодня о 6:00 ранку (4:00 UTC, бо Київ = UTC+2)
+  schedule:
+    - cron: '0 4 * * *'
+  
+  # Також можна запускати вручну через GitHub UI (для тестування)
+  workflow_dispatch:
+
+jobs:
+  generate-tasks:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 1. Клонуємо репозиторій
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      # 2. Встановлюємо Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      
+      # 3. Встановлюємо залежності backend
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: npm ci
+      
+      # 4. Запускаємо Rule Engine з секретами
+      - name: Run Rule Engine
+        working-directory: ./backend
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
+          USER_REGION: ${{ secrets.USER_REGION }}
+        run: node generate-tasks.js
+      
+      # 5. Логуємо результат (для відлагодження)
+      - name: Log success
+        if: success()
+        run: echo "✅ Rule Engine completed successfully at $(date)"
