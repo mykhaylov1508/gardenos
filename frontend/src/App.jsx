@@ -12,6 +12,10 @@ import SettingsPage from './pages/SettingsPage';
 import NewPlantPage from './pages/NewPlantPage';
 import PlantDetailPage from './pages/PlantDetailPage';
 import AddEventModal from './components/AddEventModal';
+import DashboardPage from './pages/DashboardPage';
+import SeasonPage from './pages/SeasonPage';
+import MapPage from './pages/MapPage';
+
 
 function App() {
   const { user, loading } = useAuth();
@@ -37,7 +41,10 @@ function App() {
         <>
           <Route path="/login" element={<Navigate to="/" replace />} />
           <Route element={<Layout />}>
-            <Route path="/" element={<TodayPage />} />
+            <Route path="/" element={<DashboardPage />} />
+            <Route path="/tasks" element={<TodayPage />} />
+            <Route path="/season" element={<SeasonPage />} />
+            <Route path="/map" element={<MapPage />} />
             <Route path="/garden" element={<GardenPage />} />
             <Route path="/plants" element={<PlantsPage />} />
             <Route path="/plants/new" element={<NewPlantPage />} />
