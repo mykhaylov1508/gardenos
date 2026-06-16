@@ -8,6 +8,49 @@
 import { supabase } from './supabase-client.js';
 
 // ============================================
+// 🌤 ІНТЕГРАЦІЯ ПОГОДИ (Open-Meteo API)
+// Безкоштовно, без ключів, точні дані
+// ============================================
+
+async function getWeatherForecast(latitude, longitude) {
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max&timezone=auto&forecast_days=3`;
+    
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    return {
+      today_max_c: data.daily.temperature_2m_max[0],
+      today_min_c: data.daily.temperature_2m_min[0],
+      today_rain_mm: data.daily.precipitation_sum[0],
+      today_rain_probability: data.daily.precipitation_probability_max[0],
+      tomorrow_max_c: data.daily.temperature_2m_max[1],
+      tomorrow_min_c: data.daily.temperature_2m_min[1],
+      tomorrow_rain_mm: data.daily.precipitation_sum[1],
+      // Останні 3 дні дощу (для аналізу)
+      last_3_days_rain_mm: data.daily.precipitation_sum.slice(0, 3).reduce((a, b) => a + b, 0),
+    };
+  } catch (err) {
+    console.error('⚠️  Не вдалось отримати погоду:', err.message);
+    return null;
+  }
+}
+
+// Координати основних міст України (можеш додати свої)
+const UKRAINE_CITIES = {
+  'Київ': { lat: 50.45, lon: 30.52 },
+  'Львів': { lat: 49.84, lon: 24.03 },
+  'Одеса': { lat: 46.48, lon: 30.73 },
+  'Харків': { lat: 49.99, lon: 36.23 },
+  'Вінниця': { lat: 49.23, lon: 28.47 },
+  'Дніпро': { lat: 48.46, lon: 35.04 },
+  'Запоріжжя': { lat: 47.84, lon: 35.14 },
+  'Полтава': { lat: 49.59, lon: 34.55 },
+  'Чернігів': { lat: 51.49, lon: 31.29 },
+  'Житомир': { lat: 50.25, lon: 28.66 },
+};
+
+// ============================================
 // 📅 ХЕЛПЕРИ ДЛЯ РОБОТИ З ДАТАМИ
 // ============================================
 
@@ -26,31 +69,50 @@ function daysBetween(date1, date2) {
 // 💧 ПРАВИЛО 1: ГЕНЕРАЦІЯ ЗАДАЧІ НА ПОЛИВ
 // ============================================
 
-function generateWateringTask(plant, library, events) {
-  // Шукаємо останній полив для цієї рослини
+function generateWateringTask(plant, library, events, weather) {
   const lastWatering = events.find(
     e => e.plant_id === plant.id && e.event_type === 'water'
   );
   
-  // Скільки днів пройшло з останнього поливу (або з посадки якщо не поливали)
   const referenceDate = lastWatering?.event_date || plant.planted_date;
   const daysSince = daysBetween(referenceDate, today());
   
-  // Перевіряємо чи час поливати
-  const needWater = daysSince >= library.watering_interval_days;
+  let needWater = daysSince >= library.watering_interval_days;
+  let weatherNote = '';
+  
+  // Якщо є погода — коригуємо
+  if (weather) {
+    // Якщо сьогодні або завтра дощ — не поливаємо
+    if (weather.today_rain_mm >= 5 || weather.tomorrow_rain_mm >= 5) {
+      return null; // дощ замінить полив
+    }
+    
+    // Якщо було багато дощу за 3 дні
+    if (weather.last_3_days_rain_mm >= library.watering_liters_per_m2 * 0.7) {
+      return null;
+    }
+    
+    // У спеку поливаємо частіше
+    if (weather.today_max_c >= library.heat_stress_temp) {
+      needWater = true;
+      weatherNote = ` У спеку ${weather.today_max_c}°C ґрунт висихає швидше.`;
+    }
+  }
   
   if (!needWater) return null;
   
-  // Формуємо зрозуміле пояснення "ЧОМУ"
-  const explanation = `Минуло ${daysSince} днів з останнього поливу (норма: кожні ${library.watering_interval_days} днів). ${library.name_uk} потребує ${library.watering_liters_per_m2} л/м² води.`;
+  // Якщо спека — рекомендуємо вечірній полив
+  const recommendedTime = (weather && weather.today_max_c > 28)
+    ? 'Ввечері (після 18:00) — вдень згорить листя'
+    : 'Вранці (до 9:00) або ввечері (після 18:00)';
   
   return {
     task_type: 'water',
     title: `💧 Полити ${plant.custom_name || library.name_uk}`,
     action_description: `Вилити ~${library.watering_liters_per_m2} літрів води під корінь`,
-    explanation_text: explanation,
-    priority: 'normal',
-    recommended_time: 'Вранці (до 9:00) або ввечері (після 18:00)'
+    explanation_text: `Минуло ${daysSince} днів з останнього поливу (норма: кожні ${library.watering_interval_days} днів). ${library.name_uk} потребує ${library.watering_liters_per_m2} л/м² води.${weatherNote}`,
+    priority: (weather && weather.today_max_c > 32) ? 'high' : 'normal',
+    recommended_time: recommendedTime
   };
 }
 
@@ -158,6 +220,27 @@ async function generateDailyTasks() {
   console.log('🌅 Запуск Rule Engine...\n');
   console.log(`📅 Сьогодні: ${today()}`);
   
+  // 1. Отримуємо регіон користувача
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('region')
+    .limit(1)
+    .single();
+  
+  const cityName = profile?.region?.split(' ')[0] || 'Київ';
+  const coords = UKRAINE_CITIES[cityName] || UKRAINE_CITIES['Київ'];
+  
+  // 2. Отримуємо погоду
+  console.log(`\n🌤 Отримую погоду для ${cityName}...`);
+  const weather = await getWeatherForecast(coords.lat, coords.lon);
+  
+  if (weather) {
+    console.log(`✅ Погода: сьогодні ${weather.today_max_c}°C, дощ ${weather.today_rain_mm}мм (${weather.today_rain_probability}%)`);
+    console.log(`   Завтра: ${weather.tomorrow_max_c}°C, дощ ${weather.tomorrow_rain_mm}мм`);
+  } else {
+    console.log('⚠️  Працюю без погодних даних');
+  }
+  
   // 1. Отримуємо всі активні рослини користувача
   console.log('\n📖 Читаю рослини з бази даних...');
   const { data: plants, error: plantsError } = await supabase
@@ -217,7 +300,7 @@ async function generateDailyTasks() {
     const library = plant.plant_library;
     
     // Правило 1: Полив
-    const waterTask = generateWateringTask(plant, library, events || []);
+    const waterTask = generateWateringTask(plant, library, events || [], weather);
     if (waterTask) newTasks.push({ ...waterTask, plant_id: plant.id, user_id: plant.user_id });
     
     // Правило 2: Підживлення
@@ -227,6 +310,42 @@ async function generateDailyTasks() {
     // Правило 3: Збір урожаю
     const harvestTask = generateHarvestTask(plant, library, events || []);
     if (harvestTask) newTasks.push({ ...harvestTask, plant_id: plant.id, user_id: plant.user_id });
+
+        // Правило 5: Алерт на заморозки (якщо є погода)
+    if (weather && weather.tomorrow_min_c < 5) {
+      const isYoung = daysBetween(plant.planted_date, today()) < 30;
+      const lib = plant.plant_library;
+      
+      if (lib.frost_tolerance_c !== null && weather.tomorrow_min_c < lib.frost_tolerance_c + 2) {
+        newTasks.push({
+          plant_id: plant.id,
+          user_id: plant.user_id,
+          task_type: 'alert',
+          title: `🚨 ЗАМОРОЗКИ! Вкрий ${plant.custom_name || lib.name_uk}`,
+          action_description: `Накрити агроволокном або плівкою до 18:00`,
+          explanation_text: `Прогноз: завтра вночі ${weather.tomorrow_min_c}°C. ${lib.name_uk} витримує до ${lib.frost_tolerance_c}°C. ${isYoung ? 'Молода рослина особливо вразлива.' : ''} Без укриття ризик загибелі.`,
+          priority: 'high',
+          recommended_time: 'Сьогодні до 18:00'
+        });
+      }
+    }
+    
+    // Правило 6: Спека алерт
+    if (weather && weather.today_max_c >= 32) {
+      const lib = plant.plant_library;
+      if (lib.heat_stress_temp && weather.today_max_c >= lib.heat_stress_temp) {
+        newTasks.push({
+          plant_id: plant.id,
+          user_id: plant.user_id,
+          task_type: 'alert',
+          title: `🔥 Спека ${weather.today_max_c}°C! Захисти ${plant.custom_name || lib.name_uk}`,
+          action_description: `Полити ввечері, затінити якщо можливо`,
+          explanation_text: `Температура вище критичної для ${lib.name_uk} (${lib.heat_stress_temp}°C). У спеку рослини в стресі, можуть скинути зав'язь. Поливати тільки ввечері — вдень згорить листя. НЕ підживлювати.`,
+          priority: 'high',
+          recommended_time: 'Ввечері після 18:00'
+        });
+      }
+    }
   }
   
   // Правило 4: Щотижневий огляд (загальна задача)

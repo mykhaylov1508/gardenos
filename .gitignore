@@ -1,0 +1,21 @@
+# Залежності
+node_modules/
+frontend/node_modules/
+backend/node_modules/
+
+# Секретні ключі
+.env
+.env.local
+.env.production
+backend/.env
+
+# Білди
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
