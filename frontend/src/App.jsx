@@ -17,6 +17,7 @@ import SeasonPage from './pages/SeasonPage';
 import MapPage from './pages/MapPage';
 import ZonesPage from './pages/ZonesPage';
 import ProfilePage from './pages/ProfilePage';
+import { PlannerPage } from './features/planner/PlannerPage';
 
 
 function App() {
@@ -53,6 +54,7 @@ function App() {
             <Route path="/plants/new" element={<NewPlantPage />} />
             <Route path="/plants/:id" element={<PlantDetailPage />} />
             <Route path="/settings" element={<ProfilePage />} />
+            <Route path="/planner" element={<PlannerPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </>

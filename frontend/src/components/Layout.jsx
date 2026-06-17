@@ -12,7 +12,8 @@ import {
   Loader2,
   Home,
   Calendar,
-  BookOpen
+  BookOpen,
+  Compass
 } from 'lucide-react';
 
 export default function Layout() {
@@ -91,6 +92,11 @@ export default function Layout() {
             <CalendarCheck className="w-6 h-6" />
             <span className="text-xs font-semibold">Задачі</span>
           </NavLink>
+          {/* 👇 НОВА ВКЛАДКА ПЛАНУВАЛЬНИКА */}
+          <NavLink to="/planner" className={tabClass}>
+            <Compass className="w-6 h-6" />
+            <span className="text-xs font-semibold">Планувальник</span>
+          </NavLink>
           <NavLink to="/season" className={tabClass}>
             <Calendar className="w-6 h-6" />
             <span className="text-xs font-semibold">Сезон</span>
@@ -105,6 +111,7 @@ export default function Layout() {
           </NavLink>
         </div>
       </nav>
+
       {/* FAB - 3 священні дії */}
       <FAB />
     </div>

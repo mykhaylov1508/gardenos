@@ -40,7 +40,7 @@ export default function DashboardPage() {
       // 2. Рахуємо статистику
       const { data: plants } = await supabase
         .from('my_plants')
-        .select('*, plant_library(vegetation_days), health_score')
+        .select('*, plant_library(vegetation_days), health_score, growth_stage')
         .eq('user_id', user.id)
         .eq('status', 'active');
       
@@ -63,26 +63,31 @@ export default function DashboardPage() {
         }
       });
       
-      // Розрахунок загального Health Score (середнє по всіх рослинах)
-      const healthScores = (plants || [])
-        .map(p => p.health_score)
-        .filter(score => score !== null && score !== undefined);
+// Розрахунок загального Health Score
+// Рахуємо на основі простих правил
+let averageHealthScore = 100;
+let plantsWithIssues = 0;
 
-      const averageHealthScore = healthScores.length > 0
-        ? Math.round(healthScores.reduce((sum, score) => sum + score, 0) / healthScores.length)
-        : 100; // Якщо немає даних, показуємо 100%
+(plants || []).forEach(plant => {
+  // Перевіряємо чи є planted_date
+  if (!plant.planted_date) return;
+  
+  // Простий розрахунок: якщо рослина посаджена давно (>30 днів) і прогрес >50%
+  const daysPlanted = Math.floor(
+    (new Date() - new Date(plant.planted_date)) / (1000 * 60 * 60 * 24)
+  );
+  const progress = plant.plant_library?.vegetation_days 
+    ? (daysPlanted / plant.plant_library.vegetation_days) * 100 
+    : 0;
+  
+  // Якщо прогрес > 80% і пройшло багато часу — рослина може потребувати уваги
+  if (progress > 80 && progress < 100) {
+    plantsWithIssues++;
+    averageHealthScore -= 3;
+  }
+});
 
-      // Підрахунок рослин з проблемами
-      const plantsWithIssues = healthScores.filter(score => score < 70).length;
-
-      setStats({
-        totalPlants: (plants || []).length,
-        plantsWithIssues,
-        tasksToday: (tasks || []).length,
-        urgentTasks: (tasks || []).filter(t => t.priority === 'high' || t.priority === 'urgent').length,
-        readyToHarvest,
-        healthScore: averageHealthScore,
-      });
+averageHealthScore = Math.max(0, Math.min(100, averageHealthScore));
       
       // Критичні задачі (high priority)
       // Сортуємо задачі: спочатку urgent/high, потім normal. Беремо максимум 4.

@@ -7,6 +7,7 @@ import { Droplet, Leaf, Apple, Search, CheckCircle, AlertCircle, Loader2 } from 
 export default function TodayPage() {
   const { user } = useAuth();
   const [tasks, setTasks] = useState([]);
+  const [futureTasks, setFutureTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -18,8 +19,9 @@ export default function TodayPage() {
     try {
       setLoading(true);
       const today = new Date().toISOString().split('T')[0];
-
-      const { data, error } = await supabase
+      
+      // Задачі на сьогодні
+      const { data: todayTasks, error: todayError } = await supabase
         .from('tasks')
         .select(`
           *,
@@ -34,8 +36,32 @@ export default function TodayPage() {
         .eq('is_completed', false)
         .order('priority', { ascending: false });
 
-      if (error) throw error;
-      setTasks(data || []);
+      if (todayError) throw todayError;
+      
+      // 🔥 НОВЕ: Майбутні задачі (наступні 30 днів)
+      const thirtyDaysLater = new Date();
+      thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30);
+      const futureDateStr = thirtyDaysLater.toISOString().split('T')[0];
+      
+      const { data: futureTasks } = await supabase
+        .from('tasks')
+        .select(`
+          *,
+          my_plants (
+            id,
+            custom_name,
+            plant_library (name_uk)
+          )
+        `)
+        .eq('user_id', user.id)
+        .gt('due_date', today)          // пізніше сьогодні
+        .lte('due_date', futureDateStr) // але не пізніше ніж через 30 днів
+        .eq('is_completed', false)
+        .order('due_date', { ascending: true })
+        .limit(5);
+      
+      setTasks(todayTasks || []);
+      setFutureTasks(futureTasks || []); // ← треба додати state
     } catch (err) {
       console.error('Помилка:', err);
       setError(err.message);
@@ -180,6 +206,50 @@ export default function TodayPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* 🔥 НОВЕ: Планові задачі (майбутні) */}
+      {!loading && !error && futureTasks.length > 0 && (
+        <div className="mt-8">
+          <h3 className="text-lg font-bold text-garden-green mb-3 flex items-center gap-2">
+            📅 Планові задачі (найближчі 30 днів)
+          </h3>
+          <div className="space-y-3">
+            {futureTasks.map((task) => (
+              <div
+                key={task.id}
+                className="card bg-garden-cream/30 border-l-4 border-garden-water"
+              >
+                <div className="flex items-start gap-4">
+                  <div className="flex-shrink-0 w-12 h-12 bg-garden-water/10 rounded-xl flex items-center justify-center">
+                    {getTaskIcon(task.task_type)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs font-semibold text-garden-water bg-garden-water/10 px-2 py-0.5 rounded-full">
+                        📅 {new Date(task.due_date).toLocaleDateString('uk-UA', {
+                          day: 'numeric', month: 'short'
+                        })}
+                      </span>
+                    </div>
+                    <h4 className="font-bold text-garden-green mb-1">{task.title}</h4>
+                    {task.action_description && (
+                      <p className="text-sm text-gray-700 mb-2">📝 {task.action_description}</p>
+                    )}
+                    {task.explanation_text && (
+                      <div className="bg-white/50 rounded-lg p-2 mb-2">
+                        <p className="text-xs text-gray-700">
+                          <span className="font-semibold text-garden-green">💡 Чому: </span>
+                          {task.explanation_text.substring(0, 150)}...
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
