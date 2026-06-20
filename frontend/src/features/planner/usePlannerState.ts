@@ -40,6 +40,9 @@ interface PlannerState {
   
   // Оптимізаційна ціль (що для тебе важливіше)
   optimization_goal: 'yield' | 'convenience' | 'low_care';
+  // Який план зараз завантажений (для відображення в хедері)
+  loaded_plan_id?: string;
+  loaded_plan_name?: string;
   
   // Дії
   setStep: (step: 1 | 2 | 3) => void;
@@ -48,7 +51,10 @@ interface PlannerState {
   togglePlant: (plant: SelectedPlantData) => void;
   setPlantQuantity: (library_id: string, quantity: number) => void;
   setOptimizationGoal: (goal: 'yield' | 'convenience' | 'low_care') => void;
+  setLoadedPlan: (id: string, name: string) => void;
+  clearLoadedPlan: () => void;
   reset: () => void;
+
 }
 
 /**
@@ -65,6 +71,8 @@ const INITIAL_STATE = {
   },
   selected_plants: [],
   optimization_goal: 'yield' as const,
+  loaded_plan_id: undefined,
+  loaded_plan_name: undefined,
 };
 
 /**
@@ -111,8 +119,9 @@ export const usePlannerState = create<PlannerState>()(
         })),
       
       setOptimizationGoal: (goal) => set({ optimization_goal: goal }),
-      
-      reset: () => set(INITIAL_STATE),
+      setLoadedPlan: (id, name) => set({ loaded_plan_id: id, loaded_plan_name: name }),
+      clearLoadedPlan: () => set({ loaded_plan_id: undefined, loaded_plan_name: undefined }),
+      reset: () => set({ ...INITIAL_STATE, loaded_plan_id: undefined, loaded_plan_name: undefined }),
     }),
     {
       name: 'gardenos-planner-draft', // Ключ у localStorage

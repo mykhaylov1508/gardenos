@@ -231,7 +231,10 @@ export function useGardenPlans() {
           }
 
           // Додаткова задача на сьогодні
-          const prepDate = new Date().toISOString().split('T')[0];
+                    // 3e. 🔥 НОВЕ: Створюємо задачу "Підготуватись" НА СЬОГОДНІ
+          // Щоб користувач одразу побачив її в списку задач
+          const prepDate = new Date().toISOString().split('T')[0]; // сьогодні
+
           const { error: prepTaskError } = await supabase
             .from('tasks')
             .insert({
@@ -239,10 +242,15 @@ export function useGardenPlans() {
               plant_id: newPlant.id,
               task_type: 'general',
               title: `📋 Підготувати грядку для ${bed.name_uk}`,
-              action_description: `Підготувати ґрунт, внести компост, перевірити розмітку для "${zoneName}"`,
-              explanation_text: `До посадки ${bed.name_uk} залишилось кілька тижнів. Підготуй грядку заздалегідь.`,
-              due_date: prepDate,
-              recommended_time: 'У вихідний день',
+              action_description: `Підготувати ґрунт, внести компост, перевірити розмітку для "${zoneName}" (${bed.width_m.toFixed(1)}×${bed.length_m.toFixed(1)} м)`,
+              explanation_text: `До посадки ${bed.name_uk} залишилось кілька тижнів. Підготуй грядку заздалегідь:\n\n` +
+                `• Перекопай ґрунт на глибину 20-25 см\n` +
+                `• Внеси компост (3-4 кг на м²)\n` +
+                `• Розрівняй граблями\n` +
+                `• Перевір рівень pH (для ${bed.name_uk} оптимально ${libItem.regional_ukraine?.notes || '6.0-7.0'})\n\n` +
+                `Посадка запланована на ${regional.planting_date || 'весну'}.`,
+              due_date: prepDate, // ← сьогодні!
+              recommended_time: 'У вихідний день, коли є 1-2 години',
               priority: 'normal',
               is_completed: false,
             });

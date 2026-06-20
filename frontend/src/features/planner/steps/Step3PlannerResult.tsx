@@ -8,6 +8,9 @@ import { generateLayout, type LayoutInput, type PlantToLayout } from '../utils/l
 import { generateSuggestions } from '../utils/suggestions';
 import { calculateRequiredPlants } from '../utils/calculations';
 import { useGardenPlans } from '../useGardenPlans';
+import { Loader2 } from 'lucide-react';
+import { loadZonesHistory } from '../utils/cropRotation';
+import { useAuth } from '../../../contexts/AuthContext';
 
 interface PlantLibraryItem {
   id: string;
@@ -50,8 +53,8 @@ const AVG_YIELD_PER_PLANT: Record<string, number> = {
 
 export function Step3PlannerResult() {
     const useGardenPlansHook = useGardenPlans;
-  const { plot, selected_plants, family_size, optimization_goal, setStep, reset } =
-    usePlannerState();
+  const { plot, selected_plants, family_size, optimization_goal, setStep, reset } = usePlannerState();
+  const { applyPlanToGarden, savePlan, loading: savingLoading } = useGardenPlans();
 
   // ✅ Чекбокси зберігаються за НАЗВОЮ рослини (не за індексом)
   const [selectedSuggestions, setSelectedSuggestions] = useState<Set<string>>(new Set());
@@ -70,6 +73,15 @@ export function Step3PlannerResult() {
       if (error) throw error;
       return data as PlantLibraryItem[];
     },
+  });
+
+  const { user } = useAuth();
+
+  // 🔄 Завантажуємо історію зон для сівозміни
+  const { data: zonesHistory = [] } = useQuery({
+    queryKey: ['zones_history_for_planner', user?.id],
+    queryFn: () => user ? loadZonesHistory(user.id) : Promise.resolve([]),
+    enabled: !!user,
   });
 
   const planResult = useMemo(() => {
@@ -107,6 +119,7 @@ export function Step3PlannerResult() {
       water_source,
       north_direction: plot.north_direction,
       plants: plantsToLayout,
+      zones_history: zonesHistory,
     };
 
     const layout = generateLayout(layoutInput);
@@ -126,7 +139,7 @@ export function Step3PlannerResult() {
       plantsToLayout,
       total_area: plot.width_m * plot.length_m,
     };
-  }, [library, selected_plants, plot, family_size, optimization_goal]);
+  }, [library, selected_plants, plot, family_size,optimization_goal, zonesHistory]);
 
   const handleBack = () => setStep(2);
 
@@ -506,48 +519,45 @@ export function Step3PlannerResult() {
       )}
 
       {/* Кнопки дій */}
-        <div className="flex flex-wrap gap-4 justify-between">
+      <div className="flex flex-wrap gap-4 justify-between">
         <button
-            onClick={handleBack}
-            className="px-6 py-3 bg-earth-brown/10 text-earth-brown rounded-xl font-semibold hover:bg-earth-brown/20 transition flex items-center gap-2"
+          onClick={handleBack}
+          disabled={savingLoading}
+          className="px-6 py-3 bg-earth-brown/10 text-earth-brown rounded-xl font-semibold hover:bg-earth-brown/20 transition flex items-center gap-2 disabled:opacity-50"
         >
-            ← Назад до вибору рослин
+          ← Назад до вибору рослин
         </button>
 
         <div className="flex gap-3">
-            <button
+          <button
             onClick={handleReset}
-            className="px-6 py-3 border-2 border-earth-brown/20 text-earth-brown rounded-xl hover:bg-earth-brown/5 transition"
-            >
+            disabled={savingLoading}
+            className="px-6 py-3 border-2 border-earth-brown/20 text-earth-brown rounded-xl hover:bg-earth-brown/5 transition disabled:opacity-50"
+          >
             🔄 Новий план
-            </button>
-            
-            {/* 💾 Зберегти як шаблон */}
-            <button
-            onClick={async () => {
-                const planName = prompt('Назва плану:', `План ${new Date().toLocaleDateString('uk-UA')}`);
-                if (!planName) return;
+          </button>
 
-                const { applyPlanToGarden } = await import('../useGardenPlans');
-                const { applyPlanToGarden: applyFn } = useGardenPlansHook();
-                
-                // Просто зберігаємо як шаблон (без застосування)
-                const { savePlan } = useGardenPlansHook();
-                const result = await savePlan({
+          {/* 💾 Зберегти як шаблон (без застосування) */}
+          <button
+            onClick={async () => {
+              const planName = prompt('Назва плану (шаблон):', `План ${new Date().toLocaleDateString('uk-UA')}`);
+              if (!planName) return;
+
+              const result = await savePlan({
                 name: planName,
                 plot_config: {
-                    width_m: plot.width_m,
-                    length_m: plot.length_m,
-                    water_source: plot.water_source,
-                    north_direction: plot.north_direction,
+                  width_m: plot.width_m,
+                  length_m: plot.length_m,
+                  water_source: plot.water_source,
+                  north_direction: plot.north_direction,
                 },
                 family_size,
                 optimization_goal,
                 selected_plants: selected_plants.map(p => ({
-                    library_id: p.library_id,
-                    name_uk: p.name_uk,
-                    quantity: p.custom_quantity || 0,
-                    priority: p.priority,
+                  library_id: p.library_id,
+                  name_uk: p.name_uk,
+                  quantity: p.custom_quantity || 0,
+                  priority: p.priority,
                 })),
                 layout,
                 suggestions,
@@ -555,55 +565,56 @@ export function Step3PlannerResult() {
                 used_area_m2: layout.total_used_area_m2,
                 empty_area_m2: layout.total_empty_area_m2,
                 expected_yield_kg: totalYield,
-                });
+              });
 
-                if (result.success) {
+              if (result.success) {
                 alert(`✅ План "${planName}" збережено як шаблон!`);
-                } else {
+              } else {
                 alert(`❌ Помилка: ${result.error}`);
-                }
+              }
             }}
-            className="px-6 py-3 bg-dew-blue text-white rounded-xl font-semibold hover:bg-dew-blue/90 transition shadow-md"
-            >
-            💾 Зберегти як шаблон
-            </button>
+            disabled={savingLoading}
+            className="px-6 py-3 bg-dew-blue text-white rounded-xl font-semibold hover:bg-dew-blue/90 transition shadow-md disabled:opacity-50 flex items-center gap-2"
+          >
+            {savingLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+            💾 Зберегти шаблон
+          </button>
 
-            {/* 🚀 Застосувати до городу */}
-            <button
+          {/* 🚀 Застосувати до городу */}
+          <button
             onClick={async () => {
-                const planName = prompt(
-                'Назва плану (буде застосовано до городу):', 
+              const planName = prompt(
+                'Назва плану (буде застосовано до городу):',
                 `План ${new Date().toLocaleDateString('uk-UA')}`
-                );
-                if (!planName) return;
+              );
+              if (!planName) return;
 
-                const confirm = window.confirm(
+              const confirmed = window.confirm(
                 `🚀 Застосувати план "${planName}" до городу?\n\n` +
                 `Це створить:\n` +
                 `• ${layout.beds.length} зон (грядок)\n` +
                 `• ${layout.beds.length} рослин в городі\n` +
-                `• ${layout.beds.length} задач "Посадити"\n\n` +
-                `Рослини отримають статус "planned" (заплановані).\n` +
+                `• Задачі "Посадити" + "Підготувати грядку"\n\n` +
+                `Рослини отримають статус "planned".\n` +
                 `Продовжити?`
-                );
-                if (!confirm) return;
+              );
+              if (!confirmed) return;
 
-                const { applyPlanToGarden } = useGardenPlansHook();
-                const result = await applyPlanToGarden({
+              const result = await applyPlanToGarden({
                 name: planName,
                 plot_config: {
-                    width_m: plot.width_m,
-                    length_m: plot.length_m,
-                    water_source: plot.water_source,
-                    north_direction: plot.north_direction,
+                  width_m: plot.width_m,
+                  length_m: plot.length_m,
+                  water_source: plot.water_source,
+                  north_direction: plot.north_direction,
                 },
                 family_size,
                 optimization_goal,
                 selected_plants: selected_plants.map(p => ({
-                    library_id: p.library_id,
-                    name_uk: p.name_uk,
-                    quantity: p.custom_quantity || 0,
-                    priority: p.priority,
+                  library_id: p.library_id,
+                  name_uk: p.name_uk,
+                  quantity: p.custom_quantity || 0,
+                  priority: p.priority,
                 })),
                 layout,
                 suggestions,
@@ -611,32 +622,34 @@ export function Step3PlannerResult() {
                 used_area_m2: layout.total_used_area_m2,
                 empty_area_m2: layout.total_empty_area_m2,
                 expected_yield_kg: totalYield,
-                });
+              });
 
-                if (result.success) {
+              if (result.success) {
                 alert(
-                    `🎉 План успішно застосовано!\n\n` +
-                    `✅ Створено зон: ${result.zones_created}\n` +
-                    `✅ Створено рослин: ${result.plants_created}\n` +
-                    `✅ Створено задач: ${result.tasks_created}\n\n` +
-                    `Тепер відкрий "Город" або "Задачі" щоб побачити результати!`
+                  `🎉 План успішно застосовано!\n\n` +
+                  `✅ Створено зон: ${result.zones_created}\n` +
+                  `✅ Створено рослин: ${result.plants_created}\n` +
+                  `✅ Створено задач: ${result.tasks_created}\n\n` +
+                  `Тепер відкрий "Город" або "Задачі" щоб побачити результати!`
                 );
-                } else {
+              } else {
                 alert(
-                    `⚠️ Застосовано з помилками:\n\n` +
-                    `Зон: ${result.zones_created}\n` +
-                    `Рослин: ${result.plants_created}\n` +
-                    `Задач: ${result.tasks_created}\n\n` +
-                    `Помилки:\n${result.errors.join('\n')}`
+                  `⚠️ Застосовано з помилками:\n\n` +
+                  `Зон: ${result.zones_created}\n` +
+                  `Рослин: ${result.plants_created}\n` +
+                  `Задач: ${result.tasks_created}\n\n` +
+                  `Помилки:\n${result.errors.join('\n')}`
                 );
-                }
+              }
             }}
-            className="px-8 py-3 bg-garden-green text-white rounded-xl font-semibold hover:bg-garden-green/90 transition shadow-lg shadow-garden-green/20"
-            >
+            disabled={savingLoading}
+            className="px-8 py-3 bg-garden-green text-white rounded-xl font-semibold hover:bg-garden-green/90 transition shadow-lg shadow-garden-green/20 disabled:opacity-50 flex items-center gap-2"
+          >
+            {savingLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
             🚀 Застосувати до городу
-            </button>
+          </button>
         </div>
-        </div>
+      </div>
     </div>
   );
 }

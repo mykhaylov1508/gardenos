@@ -3,6 +3,8 @@
 
 import { PLANT_SPACING, WATER_NEEDS, PLANT_HEIGHTS } from '../constants';
 import { checkCompatibility } from './compatibility';
+import { checkCropRotation, type ZoneHistory } from './cropRotation';
+
 
 export interface LayoutInput {
   plot_width_m: number;
@@ -10,6 +12,7 @@ export interface LayoutInput {
   water_source?: { x_m: number; y_m: number };
   north_direction?: 'top' | 'bottom' | 'left' | 'right';
   plants: PlantToLayout[];
+  zones_history?: ZoneHistory[];  // 🆕 Історія посадок для сівозміни
 }
 
 export interface PlantToLayout {
@@ -76,7 +79,8 @@ export function generateLayout(input: LayoutInput): LayoutResult {
       plant,
       beds,
       water_source,
-      north_direction
+      north_direction,
+      input.zones_history
     );
     
     if (!best_spot) {
@@ -96,7 +100,8 @@ export function generateLayout(input: LayoutInput): LayoutResult {
         plant.name_uk,
         best_spot,
         water_source,
-        north_direction
+        north_direction,
+        input.zones_history
       ),
     };
     
@@ -171,6 +176,36 @@ function calculateBedSize(
 }
 
 /**
+ * 🌿 Визначає родину рослини за назвою
+ */
+function getPlantFamily(plantName: string): string | null {
+  const familyMap: Record<string, string> = {
+    // Пасльонові
+    'томат': 'Solanaceae', 'картопля': 'Solanaceae', 
+    'перець': 'Solanaceae', 'баклажан': 'Solanaceae',
+    // Гарбузові
+    'огірок': 'Cucurbitaceae', 'кабачок': 'Cucurbitaceae', 
+    'гарбуз': 'Cucurbitaceae',
+    // Капустяні
+    'капуста': 'Brassicaceae', 'редис': 'Brassicaceae',
+    // Зонтичні
+    'морква': 'Apiaceae', 'петрушка': 'Apiaceae', 
+    'кріп': 'Apiaceae',
+    // Амарилісові
+    'цибуля': 'Amaryllidaceae', 'часник': 'Amaryllidaceae',
+    // Бобові
+    'горох': 'Fabaceae', 'квасоля': 'Fabaceae',
+    // Айстрові
+    'салат': 'Asteraceae', 'соняшник': 'Asteraceae',
+    // Розові
+    'полуниця': 'Rosaceae', 'малина': 'Rosaceae',
+    // Лободові
+    'буряк': 'Amaranthaceae', 'шпинат': 'Amaranthaceae',
+  };
+  return familyMap[plantName.toLowerCase()] || null;
+}
+
+/**
  * 🔍 КЛЮЧОВА ФУНКЦІЯ: шукає найкраще місце
  * ПРОБУЄМО 8 ПОЗИЦІЙ в кожній зоні для оптимального розміщення
  */
@@ -180,90 +215,122 @@ function findBestSpot(
   plant: PlantToLayout,
   existing_beds: BedPlacement[],
   water_source: { x_m: number; y_m: number } | undefined,
-  north_direction: string
+  north_direction: string,
+  zones_history?: ZoneHistory[]
 ): { x_m: number; y_m: number; score: number } | null {
   let best_spot: { x_m: number; y_m: number; score: number } | null = null;
-  
+
   for (const zone of free_zones) {
     if (bed_size.width_m > zone.width_m || bed_size.length_m > zone.length_m) {
       continue;
     }
-    
-    // 🎯 КЛЮЧОВЕ: 8 позицій в зоні (кути + середини сторін)
+
+    // 🎯 8 позицій в зоні: 4 кути + 4 середини сторін
     const positions = [
-      // 4 кути
-      { x: zone.x_m, y: zone.y_m }, // верх-лівий
-      { x: zone.x_m + zone.width_m - bed_size.width_m, y: zone.y_m }, // верх-правий
-      { x: zone.x_m, y: zone.y_m + zone.length_m - bed_size.length_m }, // низ-лівий
-      { x: zone.x_m + zone.width_m - bed_size.width_m, y: zone.y_m + zone.length_m - bed_size.length_m }, // низ-правий
-      // 4 середини сторін
-      { x: zone.x_m + (zone.width_m - bed_size.width_m) / 2, y: zone.y_m }, // верх-центр
-      { x: zone.x_m + (zone.width_m - bed_size.width_m) / 2, y: zone.y_m + zone.length_m - bed_size.length_m }, // низ-центр
-      { x: zone.x_m, y: zone.y_m + (zone.length_m - bed_size.length_m) / 2 }, // ліво-центр
-      { x: zone.x_m + zone.width_m - bed_size.width_m, y: zone.y_m + (zone.length_m - bed_size.length_m) / 2 }, // право-центр
+      { x: zone.x_m, y: zone.y_m },
+      { x: zone.x_m + zone.width_m - bed_size.width_m, y: zone.y_m },
+      { x: zone.x_m, y: zone.y_m + zone.length_m - bed_size.length_m },
+      { x: zone.x_m + zone.width_m - bed_size.width_m, y: zone.y_m + zone.length_m - bed_size.length_m },
+      { x: zone.x_m + (zone.width_m - bed_size.width_m) / 2, y: zone.y_m },
+      { x: zone.x_m + (zone.width_m - bed_size.width_m) / 2, y: zone.y_m + zone.length_m - bed_size.length_m },
+      { x: zone.x_m, y: zone.y_m + (zone.length_m - bed_size.length_m) / 2 },
+      { x: zone.x_m + zone.width_m - bed_size.width_m, y: zone.y_m + (zone.length_m - bed_size.length_m) / 2 },
     ];
-    
+
     for (const pos of positions) {
       const x_m = pos.x;
       const y_m = pos.y;
-      
       let score = 100;
-      
-      // 💧 Фактор 1: Близькість до води (для вологолюбних)
+
+      // 💧 Близькість до води (для вологолюбних)
       if (water_source) {
         const water_need = WATER_NEEDS[plant.name_uk as keyof typeof WATER_NEEDS];
         if (water_need === 'high') {
           const bed_center_x = x_m + bed_size.width_m / 2;
           const bed_center_y = y_m + bed_size.length_m / 2;
-          
           const distance_to_water = Math.sqrt(
-            Math.pow(bed_center_x - water_source.x_m, 2) + 
+            Math.pow(bed_center_x - water_source.x_m, 2) +
             Math.pow(bed_center_y - water_source.y_m, 2)
           );
-          
-          // БОНУС до 100 балів за близькість (дуже сильний вплив!)
           const water_bonus = Math.max(0, 100 - distance_to_water * 8);
           score += water_bonus;
         }
       }
-      
-      // 🌳 Фактор 2: Висота (ставимо високі з північної сторони)
+
+      // 🌳 Висота (з північної сторони) — працює для всіх напрямків
       const plant_height = PLANT_HEIGHTS[plant.name_uk as keyof typeof PLANT_HEIGHTS] || 0;
       if (plant_height > 80) {
         const zone_center_y = zone.y_m + zone.length_m / 2;
         const zone_center_x = zone.x_m + zone.width_m / 2;
-        
         if (north_direction === 'top' && y_m < zone_center_y) score += 30;
         if (north_direction === 'bottom' && y_m > zone_center_y) score += 30;
         if (north_direction === 'left' && x_m < zone_center_x) score += 30;
         if (north_direction === 'right' && x_m > zone_center_x) score += 30;
       }
-      
-      // 🤝 Фактор 3: Сумісність із сусідами
+
+      // 🤝 Сумісність із сусідами
       for (const existing of existing_beds) {
         const existing_center_x = existing.x_m + existing.width_m / 2;
         const existing_center_y = existing.y_m + existing.length_m / 2;
         const bed_center_x = x_m + bed_size.width_m / 2;
         const bed_center_y = y_m + bed_size.length_m / 2;
-        
         const distance = Math.sqrt(
-          Math.pow(bed_center_x - existing_center_x, 2) + 
+          Math.pow(bed_center_x - existing_center_x, 2) +
           Math.pow(bed_center_y - existing_center_y, 2)
         );
-        
         if (distance < 5) {
           const compat = checkCompatibility(plant.name_uk, existing.name_uk);
           if (compat.level === 'good') score += 20;
           if (compat.level === 'bad') score -= 50;
         }
       }
-      
+            // 🔄 Фактор 4: Сівозміна (перевіряємо торішні посадки поблизу)
+      if (zones_history && zones_history.length > 0) {
+        // Отримуємо родину поточної рослини
+        const currentFamily = getPlantFamily(plant.name_uk);
+        
+        if (currentFamily) {
+          // Шукаємо зони торік з тією ж родиною в радіусі 5м
+          let rotationPenalty = 0;
+          let hadLegumesNearby = false;
+          
+          for (const zone of zones_history) {
+            // Перевіряємо чи в цій зоні торік росла та ж родина
+            const sameFamilyPlantings = zone.plantings.filter(
+              p => getPlantFamily(p.plant_name) === currentFamily
+            );
+            
+            if (sameFamilyPlantings.length > 0) {
+              // Родина повторюється — штраф (але враховуємо скільки років минуло)
+              const lastPlanting = sameFamilyPlantings[0];
+              const yearsSince = new Date().getFullYear() - lastPlanting.year;
+              
+              if (yearsSince < 2) {
+                rotationPenalty += 80; // Сильний штраф за 1 рік
+              } else if (yearsSince < 3) {
+                rotationPenalty += 40; // Помірний за 2 роки
+              }
+            }
+            
+            // Бонус якщо поруч росли бобові (збагачують ґрунт)
+            const hadLegumes = zone.plantings.some(
+              p => getPlantFamily(p.plant_name) === 'Fabaceae' || 
+                   getPlantFamily(p.plant_name) === 'Бобові'
+            );
+            if (hadLegumes) hadLegumesNearby = true;
+          }
+          
+          score -= rotationPenalty;
+          if (hadLegumesNearby) score += 30;
+        }
+      }
+
       if (!best_spot || score > best_spot.score) {
         best_spot = { x_m, y_m, score };
       }
     }
   }
-  
+
   return best_spot;
 }
 
@@ -343,13 +410,13 @@ function generatePlacementReason(
   plant_name: string,
   spot: { x_m: number; y_m: number },
   water_source: { x_m: number; y_m: number } | undefined,
-  north_direction: string
+  north_direction: string,
+  zones_history?: ZoneHistory[]  // 🆕
 ): string {
   const reasons: string[] = [];
-  
   const water_need = WATER_NEEDS[plant_name as keyof typeof WATER_NEEDS];
   const height = PLANT_HEIGHTS[plant_name as keyof typeof PLANT_HEIGHTS] || 0;
-  
+
   if (water_source && water_need === 'high') {
     const distance = Math.sqrt(
       Math.pow(spot.x_m - water_source.x_m, 2) + 
@@ -366,6 +433,25 @@ function generatePlacementReason(
     }
   }
   
+    // 🆕 Причина 4: Сівозміна
+  if (zones_history && zones_history.length > 0) {
+    const family = getPlantFamily(plant_name);
+    if (family) {
+      const hasConflict = zones_history.some(z => 
+        z.plantings.some(p => getPlantFamily(p.plant_name) === family)
+      );
+      const hadLegumes = zones_history.some(z =>
+        z.plantings.some(p => getPlantFamily(p.plant_name) === 'Fabaceae')
+      );
+      
+      if (hadLegumes && !hasConflict) {
+        reasons.push(`після бобових (ґрунт збагачений азотом)`);
+      } else if (hasConflict) {
+        reasons.push(`⚠️ увага: порушення сівозміни — торік тут росла та ж родина`);
+      }
+    }
+  }
+
   if (reasons.length === 0) {
     reasons.push(`оптимальне місце з урахуванням сумісності з сусідами`);
   }

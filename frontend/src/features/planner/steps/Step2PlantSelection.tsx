@@ -5,7 +5,8 @@ import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../../lib/supabase';
 import { usePlannerState, type SelectedPlantData } from '../usePlannerState';
-
+import { loadZonesHistory, findProblematicZonesForFamily, type ZoneHistory } from '../utils/cropRotation';
+import { useAuth } from '../../../contexts/AuthContext';
 /**
  * Тип рослини з бібліотеки (те що приходить з БД)
  */
@@ -46,6 +47,15 @@ export function Step2PlantSelection() {
     },
   });
   
+  const { user } = useAuth();
+
+  // 🔄 Завантажуємо історію зон для перевірки сівозміни
+  const { data: zonesHistory = [] } = useQuery({
+    queryKey: ['zones_history_for_planner', user?.id],
+    queryFn: () => user ? loadZonesHistory(user.id) : Promise.resolve([]),
+    enabled: !!user,
+  });
+
   // Фільтруємо рослини за категорією та пошуком
   const filteredPlants = useMemo(() => {
     let result = library;
@@ -266,10 +276,36 @@ export function Step2PlantSelection() {
                 {!plant.icon_slug && '🌱'}
               </div>
               
-              {/* Назва */}
-              <div className="font-serif text-garden-green text-center mb-2">
-                {plant.name_uk}
-              </div>
+          {/* Назва + індикатор сівозміни */}
+           <div className="font-serif text-garden-green text-center mb-2 flex items-center justify-center gap-1">
+            {plant.name_uk}
+            {(() => {
+              // Отримуємо родину рослини
+              const familyMap: Record<string, string> = {
+                'томат': 'Solanaceae', 'картопля': 'Solanaceae', 
+                'перець': 'Solanaceae',
+                'огірок': 'Cucurbitaceae', 'кабачок': 'Cucurbitaceae',
+                'капуста': 'Brassicaceae', 'редис': 'Brassicaceae',
+                'морква': 'Apiaceae', 'петрушка': 'Apiaceae', 'кріп': 'Apiaceae',
+                'цибуля': 'Amaryllidaceae', 'часник': 'Amaryllidaceae',
+                'горох': 'Fabaceae', 'квасоля': 'Fabaceae',
+              };
+              const family = familyMap[plant.name_uk.toLowerCase()];
+              if (!family) return null;
+              
+              const problems = findProblematicZonesForFamily(family, zonesHistory);
+              if (problems.length === 0) return null;
+              
+              return (
+                <span 
+                  className="text-xs" 
+                  title={`⚠️ Сівозміна: ${problems[0].previousPlant} ріс тут ${problems[0].yearsSince} р. тому`}
+                >
+                  ⚠️
+                </span>
+              );
+            })()}
+           </div>
               
               {/* Швидка інфа */}
               <div className="space-y-1 text-xs text-earth-brown/70">
