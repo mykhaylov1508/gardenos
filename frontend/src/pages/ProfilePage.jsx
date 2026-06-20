@@ -53,6 +53,10 @@ export default function ProfilePage() {
   const [formData, setFormData] = useState({
     full_name: '',
     region: '',
+    latitude: '',
+    longitude: '',
+    location_name: '',
+    microclimate: '',
     plot_size_m2: '',
     soil_type: '',
     orientation: '',
@@ -61,11 +65,19 @@ export default function ProfilePage() {
     family_size: 1,
   });
 
+  const [locationSearch, setLocationSearch] = useState('');
+  const [locationResults, setLocationResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+
   useEffect(() => {
     if (profile) {
       setFormData({
         full_name: profile.full_name || '',
         region: profile.region || '',
+        latitude: profile.latitude || '',
+        longitude: profile.longitude || '',
+        location_name: profile.location_name || '',
+        microclimate: profile.microclimate || '',
         plot_size_m2: profile.plot_size_m2 || '',
         soil_type: profile.soil_type || '',
         orientation: profile.orientation || '',
@@ -90,6 +102,10 @@ export default function ProfilePage() {
         .update({
           full_name: formData.full_name.trim() || null,
           region: formData.region || null,
+          latitude: formData.latitude ? parseFloat(formData.latitude) : null,
+          longitude: formData.longitude ? parseFloat(formData.longitude) : null,
+          location_name: formData.location_name || null,
+          microclimate: formData.microclimate || null,
           plot_size_m2: formData.plot_size_m2 ? parseFloat(formData.plot_size_m2) : null,
           soil_type: formData.soil_type || null,
           orientation: formData.orientation || null,
@@ -109,6 +125,43 @@ export default function ProfilePage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  // 🔍 Пошук локації через Nominatim API (OpenStreetMap)
+  async function searchLocation(query) {
+    if (query.length < 3) {
+      setLocationResults([]);
+      return;
+    }
+    
+    setSearching(true);
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query + ', Ukraine')}&limit=5&countrycodes=ua`
+      );
+      const data = await response.json();
+      setLocationResults(data.map(item => ({
+        display_name: item.display_name,
+        lat: parseFloat(item.lat),
+        lon: parseFloat(item.lon),
+        name: item.display_name.split(',')[0], // Коротка назва
+      })));
+    } catch (err) {
+      console.error('Помилка пошуку:', err);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function selectLocation(loc) {
+    setFormData({
+      ...formData,
+      latitude: loc.lat,
+      longitude: loc.lon,
+      location_name: loc.name,
+    });
+    setLocationSearch('');
+    setLocationResults([]);
   }
 
   if (loading) {
@@ -198,6 +251,118 @@ export default function ProfilePage() {
             <p className="text-xs text-gray-500 mt-2">
               💡 Використовується для точного прогнозу погоди
             </p>
+          </div>
+        </div>
+
+        {/* Секція: Точне місцезнаходження */}
+        <div className="card">
+          <h3 className="font-bold text-garden-green mb-4 flex items-center gap-2">
+            📍 Моє точне місцезнаходження
+          </h3>
+          
+          <div className="space-y-3">
+            {/* Поточна локація */}
+            {formData.location_name && (
+              <div className="bg-garden-leaf/10 border border-garden-leaf/30 rounded-xl p-3 flex items-center justify-between">
+                <div>
+                  <div className="font-semibold text-garden-green text-sm">
+                    📍 {formData.location_name}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    {Number(formData.latitude).toFixed(4)}°, {Number(formData.longitude).toFixed(4)}°
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, latitude: '', longitude: '', location_name: '' })}
+                  className="text-garden-alert text-xs hover:underline"
+                >
+                  Видалити
+                </button>
+              </div>
+            )}
+            
+            {/* Пошук */}
+            <div>
+              <label className="block text-sm font-semibold text-garden-green mb-2">
+                🔍 Знайти моє село/місто
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={locationSearch}
+                  onChange={(e) => {
+                    setLocationSearch(e.target.value);
+                    searchLocation(e.target.value);
+                  }}
+                  placeholder="Наприклад: Стара Ушиця"
+                  className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-garden-green"
+                />
+                {searching && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                    <Loader2 className="w-5 h-5 animate-spin text-garden-green" />
+                  </div>
+                )}
+              </div>
+              
+              {/* Результати пошуку */}
+              {locationResults.length > 0 && (
+                <div className="mt-2 border border-gray-200 rounded-xl overflow-hidden">
+                  {locationResults.map((loc, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => selectLocation(loc)}
+                      className="w-full text-left px-4 py-3 hover:bg-garden-cream transition border-b border-gray-100 last:border-0"
+                    >
+                      <div className="font-semibold text-sm text-garden-green">
+                        {loc.name}
+                      </div>
+                      <div className="text-xs text-gray-500 truncate">
+                        {loc.display_name}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              
+              <p className="text-xs text-gray-500 mt-2">
+                💡 Точні координати дають найточніший прогноз погоди саме для твоєї ділянки
+              </p>
+            </div>
+            
+            {/* Мікроклімат */}
+            <div>
+              <label className="block text-sm font-semibold text-garden-green mb-2">
+                🌊 Особливості мікроклімату
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { id: 'river', label: 'Біля річки', emoji: '🌊', desc: 'Вища вологість, тумани' },
+                  { id: 'hill', label: 'На пагорбі', emoji: '⛰', desc: 'Вітряно, менше заморозків' },
+                  { id: 'valley', label: 'В низині', emoji: '🏞', desc: 'Холодніше, заморозки' },
+                  { id: 'plain', label: 'Рівнина', emoji: '🌾', desc: 'Стандартні умови' },
+                ].map(micro => (
+                  <button
+                    key={micro.id}
+                    type="button"
+                    onClick={() => setFormData({ ...formData, microclimate: micro.id })}
+                    className={`p-3 rounded-xl border-2 text-left transition-all ${
+                      formData.microclimate === micro.id 
+                        ? 'border-garden-green bg-garden-cream'
+                        : 'border-gray-100 hover:border-garden-leaf'
+                    }`}
+                  >
+                    <div className="text-2xl mb-1">{micro.emoji}</div>
+                    <div className="text-sm font-semibold text-gray-700">{micro.label}</div>
+                    <div className="text-xs text-gray-500 mt-1">{micro.desc}</div>
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                💡 Впливає на попередження про заморозки, хвороби від вологи
+              </p>
+            </div>
           </div>
         </div>
 

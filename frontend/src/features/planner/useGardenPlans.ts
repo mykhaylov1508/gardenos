@@ -146,24 +146,42 @@ export function useGardenPlans() {
 
         try {
           const zoneName = `Грядка: ${bed.name_uk}`;
-          const { data: newZone, error: zoneError } = await supabase
+
+          // Спочатку перевіряємо чи вже є така зона
+          const { data: existingZone } = await supabase
             .from('my_zones')
-            .insert({
-              user_id: user.id,
-              name: zoneName,
-              zone_type: 'bed',
-              area_m2: bed.width_m * bed.length_m,
-              description: `Створено з плану "${planData.name}"`,
-            })
-            .select()
-            .single();
+            .select('id, name, area_m2')
+            .eq('user_id', user.id)
+            .eq('name', zoneName)
+            .maybeSingle();
 
-          if (zoneError) {
-            result.errors.push(`Помилка створення зони для ${bed.name_uk}: ${zoneError.message}`);
-            continue;
+          let newZone: any;
+
+          if (existingZone) {
+            // Зона вже існує — використовуємо її
+            newZone = existingZone;
+          } else {
+            // Створюємо нову зону
+            const { data, error: zoneError } = await supabase
+              .from('my_zones')
+              .insert({
+                user_id: user.id,
+                name: zoneName,
+                zone_type: 'bed',
+                area_m2: bed.width_m * bed.length_m,
+                description: `Створено з плану "${planData.name}"`,
+              })
+              .select()
+              .single();
+
+            if (zoneError) {
+              result.errors.push(`Помилка створення зони для ${bed.name_uk}: ${zoneError.message}`);
+              continue;
+            }
+
+            newZone = data;
+            result.zones_created++;
           }
-
-          result.zones_created++;
 
           const regional = libItem.regional_ukraine || {};
           const plantedDate = parseRegionalDate(regional.planting_date);

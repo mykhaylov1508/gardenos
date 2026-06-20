@@ -18,7 +18,7 @@ import MapPage from './pages/MapPage';
 import ZonesPage from './pages/ZonesPage';
 import ProfilePage from './pages/ProfilePage';
 import { PlannerPage } from './features/planner/PlannerPage';
-
+import PlantLibraryDetailPage from './pages/PlantLibraryDetailPage';
 
 function App() {
   const { user, loading } = useAuth();
@@ -53,6 +53,7 @@ function App() {
             <Route path="/plants" element={<PlantsPage />} />
             <Route path="/plants/new" element={<NewPlantPage />} />
             <Route path="/plants/:id" element={<PlantDetailPage />} />
+            <Route path="/library/:id" element={<PlantLibraryDetailPage />} />
             <Route path="/settings" element={<ProfilePage />} />
             <Route path="/planner" element={<PlannerPage />} />
           </Route>

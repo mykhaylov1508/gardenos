@@ -39,10 +39,10 @@ export default function DashboardPage() {
       
       // 2. Рахуємо статистику
       const { data: plants } = await supabase
-        .from('my_plants')
-        .select('*, plant_library(vegetation_days), health_score, growth_stage')
-        .eq('user_id', user.id)
-        .eq('status', 'active');
+      .from('my_plants')
+      .select('*, plant_library(vegetation_days), health_score, growth_stage')
+      .eq('user_id', user.id)
+      .in('status', ['active', 'planned']);  // ← active + planned
       
       const { data: tasks } = await supabase
         .from('tasks')
@@ -63,32 +63,43 @@ export default function DashboardPage() {
         }
       });
       
-// Розрахунок загального Health Score
-// Рахуємо на основі простих правил
-let averageHealthScore = 100;
-let plantsWithIssues = 0;
+    // Розрахунок загального Health Score
+    // Рахуємо на основі простих правил
+    // Розрахунок загального Health Score
+    let averageHealthScore = 100;
+    let plantsWithIssues = 0;
 
-(plants || []).forEach(plant => {
-  // Перевіряємо чи є planted_date
-  if (!plant.planted_date) return;
-  
-  // Простий розрахунок: якщо рослина посаджена давно (>30 днів) і прогрес >50%
-  const daysPlanted = Math.floor(
-    (new Date() - new Date(plant.planted_date)) / (1000 * 60 * 60 * 24)
-  );
-  const progress = plant.plant_library?.vegetation_days 
-    ? (daysPlanted / plant.plant_library.vegetation_days) * 100 
-    : 0;
-  
-  // Якщо прогрес > 80% і пройшло багато часу — рослина може потребувати уваги
-  if (progress > 80 && progress < 100) {
-    plantsWithIssues++;
-    averageHealthScore -= 3;
-  }
-});
-
-averageHealthScore = Math.max(0, Math.min(100, averageHealthScore));
+    (plants || []).forEach(plant => {
+      // Використовуємо health_score з БД (якщо є)
+      const plantScore = plant.health_score 
+        ? Number(plant.health_score) 
+        : 100;
       
+      if (plantScore < 70) {
+        plantsWithIssues++;
+      }
+    });
+
+    // Середній health score
+    if (plants && plants.length > 0) {
+      const totalScore = plants.reduce((sum, p) => {
+        return sum + (p.health_score ? Number(p.health_score) : 100);
+      }, 0);
+      averageHealthScore = Math.round(totalScore / plants.length);
+    }
+
+    averageHealthScore = Math.max(0, Math.min(100, averageHealthScore));
+
+    // 🔧 ОНОВЛЮЄМО СТАТИСТИКУ (було відсутнє!)
+    setStats({
+      totalPlants: (plants || []).length,
+      plantsWithIssues: plantsWithIssues,
+      tasksToday: (tasks || []).length,
+      urgentTasks: (tasks || []).filter(t => t.priority === 'high' || t.priority === 'urgent').length,
+      readyToHarvest: readyToHarvest,
+      healthScore: averageHealthScore,
+    });
+
       // Критичні задачі (high priority)
       // Сортуємо задачі: спочатку urgent/high, потім normal. Беремо максимум 4.
       const priorityWeight = { urgent: 3, high: 2, normal: 1, low: 0 };
@@ -144,19 +155,31 @@ averageHealthScore = Math.max(0, Math.min(100, averageHealthScore));
 
   async function fetchWeather() {
     try {
-      // Координати Вінниці (або іншого міста з профілю)
-      const cityName = profile?.region?.split(' ')[0] || 'Вінниця';
-      const cities = {
-        'Київ': { lat: 50.45, lon: 30.52 },
-        'Львів': { lat: 49.84, lon: 24.03 },
-        'Одеса': { lat: 46.48, lon: 30.73 },
-        'Харків': { lat: 49.99, lon: 36.23 },
-        'Вінниця': { lat: 49.23, lon: 28.47 },
-        'Дніпро': { lat: 48.46, lon: 35.04 },
-      };
-      const coords = cities[cityName] || cities['Вінниця'];
+      // 🆕 Використовуємо точні координати з профілю якщо є
+      let lat, lon, locationName;
       
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weathercode&timezone=auto&forecast_days=2`;
+      if (profile?.latitude && profile?.longitude) {
+        lat = profile.latitude;
+        lon = profile.longitude;
+        locationName = profile.location_name || 'Моє місце';
+      } else {
+        const cityName = profile?.region?.split(' ')[0] || 'Вінниця';
+        const cities = {
+          'Київ': { lat: 50.45, lon: 30.52 },
+          'Львів': { lat: 49.84, lon: 24.03 },
+          'Одеса': { lat: 46.48, lon: 30.73 },
+          'Харків': { lat: 49.99, lon: 36.23 },
+          'Вінниця': { lat: 49.23, lon: 28.47 },
+          'Дніпро': { lat: 48.46, lon: 35.04 },
+          'Хмельницький': { lat: 49.42, lon: 26.99 },
+        };
+        const coords = cities[cityName] || cities['Вінниця'];
+        lat = coords.lat;
+        lon = coords.lon;
+        locationName = cityName;
+      }
+
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weathercode,relative_humidity_2m_max&timezone=auto&forecast_days=2`;
       
       const response = await fetch(url);
       const data = await response.json();
@@ -167,6 +190,7 @@ averageHealthScore = Math.max(0, Math.min(100, averageHealthScore));
           temp_min: data.daily.temperature_2m_min[0],
           rain: data.daily.precipitation_sum[0],
           code: data.daily.weathercode[0],
+          humidity: data.daily.relative_humidity_2m_max?.[0],
         },
         tomorrow: {
           temp_max: data.daily.temperature_2m_max[1],
@@ -174,7 +198,8 @@ averageHealthScore = Math.max(0, Math.min(100, averageHealthScore));
           rain: data.daily.precipitation_sum[1],
           code: data.daily.weathercode[1],
         },
-        city: cityName,
+        city: locationName,
+        hasExactCoords: !!(profile?.latitude && profile?.longitude),
       });
     } catch (err) {
       console.error('Помилка погоди:', err);
@@ -232,8 +257,13 @@ averageHealthScore = Math.max(0, Math.min(100, averageHealthScore));
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Thermometer className="w-5 h-5 text-garden-water" />
-              <h3 className="font-bold text-garden-green">
-                Погода · {weather.city}
+              <h3 className="font-bold text-garden-green flex items-center gap-2">
+                {weather.hasExactCoords ? '📍' : '🏙'} Погода · {weather.city}
+                {weather.hasExactCoords && (
+                  <span className="text-xs bg-garden-leaf/20 text-garden-leaf px-2 py-0.5 rounded-full">
+                    точна
+                  </span>
+                )}
               </h3>
             </div>
           </div>
@@ -253,10 +283,15 @@ averageHealthScore = Math.max(0, Math.min(100, averageHealthScore));
                   / {Math.round(weather.today.temp_min)}°
                 </span>
               </div>
-              <p className="text-xs text-gray-600">
+              <p className="text-xs text-gray-600 mb-1">
                 {getWeatherDescription(weather.today.code)}
                 {weather.today.rain > 0 && ` · ${weather.today.rain} мм`}
               </p>
+              {weather.today.humidity && (
+                <div className="text-xs text-gray-600 mt-1">
+                  💧 Вологість: {weather.today.humidity}%
+                </div>
+              )}
             </div>
 
             {/* Завтра */}
@@ -381,7 +416,7 @@ averageHealthScore = Math.max(0, Math.min(100, averageHealthScore));
 
         {/* Задачі */}
         <div 
-          onClick={() => navigate('/')}
+          onClick={() => navigate('/tasks')}
           className="card hover:shadow-lg cursor-pointer transition-all text-center"
         >
           <CheckCircle className="w-8 h-8 text-garden-water mx-auto mb-2" />
@@ -399,7 +434,10 @@ averageHealthScore = Math.max(0, Math.min(100, averageHealthScore));
         </div>
 
         {/* Готові до збору */}
-        <div className="card text-center">
+        <div 
+          onClick={() => navigate('/season?filter=ready')}
+          className="card hover:shadow-lg cursor-pointer transition-all text-center"
+        >
           <Apple className="w-8 h-8 text-garden-harvest mx-auto mb-2" />
           <div className="text-2xl font-bold text-garden-green mb-1">
             {stats.readyToHarvest}

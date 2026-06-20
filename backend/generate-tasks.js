@@ -368,7 +368,14 @@ function generateHarvestTask(plant, library, events, stage) {
 // ============================================
 function generateFrostAlert(plant, library, weather, stage) {
   if (!weather) return null;
-  if (weather.tomorrow_min >= 3) return null;
+  
+  // 🌊 Корекція на мікроклімат
+  let frostThreshold = 3;
+  if (microclimate === 'valley') frostThreshold = 5; // В низині заморозки сильніші
+  if (microclimate === 'hill') frostThreshold = 1;   // На пагорбі менше заморозків
+  if (microclimate === 'river') frostThreshold = 4;  // Біля річки тумани = заморозки
+  
+  if (weather.tomorrow_min >= frostThreshold) return null;
   
   const frostTolerance = library.frost_tolerance_c ?? 0;
   if (weather.tomorrow_min >= frostTolerance + 2) return null;
@@ -514,23 +521,36 @@ async function generateDailyTasks() {
   console.log(`📅 Сьогодні: ${today()}\n`);
   
   // 1. Отримуємо регіон і погоду
+  // 1. Отримуємо регіон і ТОЧНІ КООРДИНАТИ
   const { data: profile } = await supabase
     .from('profiles')
-    .select('region')
+    .select('region, latitude, longitude, location_name, microclimate')
     .limit(1)
     .maybeSingle();
-  
-  const cityName = profile?.region?.split(' ')[0] || process.env.USER_REGION || 'Київ';
-  const coords = UKRAINE_CITIES[cityName] || UKRAINE_CITIES['Київ'];
-  
-  console.log(`🌤 Отримую погоду для ${cityName}...`);
-  const weather = await getWeatherForecast(coords.lat, coords.lon);
-  
-  if (weather) {
-    console.log(`✅ Сьогодні: ${weather.today_max}°C (мін ${weather.today_min}°C), дощ ${weather.today_rain}мм`);
-    console.log(`   Завтра: ${weather.tomorrow_max}°C, дощ ${weather.tomorrow_rain}мм`);
-    console.log(`   За 7 днів: ${Math.round(weather.last_7_days_rain)}мм опадів\n`);
+
+  let coords;
+  let locationDescription;
+
+  if (profile?.latitude && profile?.longitude) {
+    // 🎯 Є точні координати — використовуємо їх
+    coords = {
+      lat: parseFloat(profile.latitude),
+      lon: parseFloat(profile.longitude),
+    };
+    locationDescription = profile.location_name || 'Моє точне місце';
+    console.log(`📍 Використовую ТОЧНІ координати: ${coords.lat.toFixed(4)}, ${coords.lon.toFixed(4)}`);
+    if (profile.microclimate) {
+      console.log(`🌊 Мікроклімат: ${profile.microclimate}`);
+    }
+  } else {
+    // Fallback на область
+    const cityName = profile?.region?.split(' ')[0] || process.env.USER_REGION || 'Київ';
+    coords = UKRAINE_CITIES[cityName] || UKRAINE_CITIES['Київ'];
+    locationDescription = cityName;
   }
+
+  console.log(`🌤 Отримую погоду для ${locationDescription}...`);
+  const weather = await getWeatherForecast(coords.lat, coords.lon);
   
   // 2. Отримуємо рослини
   console.log('📖 Читаю рослини...');
@@ -594,7 +614,7 @@ async function generateDailyTasks() {
       () => generateWateringTask(plant, library, events || [], weather, stage),
       () => generateFeedingTask(plant, library, events || [], stage),
       () => generateHarvestTask(plant, library, events || [], stage),
-      () => generateFrostAlert(plant, library, weather, stage),
+      () => generateFrostAlert(plant, library, weather, stage, profile?.microclimate),
       () => generateHeatAlert(plant, library, weather, stage),
       () => generateDiseaseAlert(plant, library, weather, stage),
       () => generatePestAlert(plant, library),
